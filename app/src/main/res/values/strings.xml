@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ADING</string>
+    <string name="retry">Coba Lagi</string>
+    <string name="no_internet_title">Koneksi Terputus</string>
+    <string name="no_internet_message">Tidak dapat terhubung ke server. Pastikan perangkat Anda terhubung ke internet.</string>
+</resources>
+
