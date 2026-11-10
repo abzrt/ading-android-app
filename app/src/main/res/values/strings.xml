@@ -4,5 +4,7 @@
     <string name="retry">Coba Lagi</string>
     <string name="no_internet_title">Koneksi Terputus</string>
     <string name="no_internet_message">Tidak dapat terhubung ke server. Pastikan perangkat Anda terhubung ke internet.</string>
+    <string name="splash_subtitle">Aplikasi Dashboard &amp; Monitoring Operasional</string>
+    <string name="splash_footer">TELKOM AKSES BRANCH BANJARMASIN</string>
 </resources>
 
