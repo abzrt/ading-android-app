@@ -8,5 +8,7 @@
     <color name="gray_bg">#F9FAFB</color>
     <color name="text_primary">#111827</color>
     <color name="text_secondary">#6B7280</color>
+    <color name="secondary_blue">#002E7A</color>
+    <color name="progress_track">#EEF0F4</color>
 </resources>
 
