@@ -65,10 +65,9 @@ public class SplashActivity extends AppCompatActivity {
             try {
                 PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
                 String versionName = pInfo.versionName;
-                long versionCode = PackageInfoCompat.getLongVersionCode(pInfo);
-                tvSplashVersion.setText(String.format(Locale.US, "Release v%s • Build #%d", versionName, versionCode));
+                tvSplashVersion.setText(String.format(Locale.US, "Release v%s", versionName));
             } catch (PackageManager.NameNotFoundException e) {
-                tvSplashVersion.setText("Release v1.0.2 • Build #2");
+                tvSplashVersion.setText("Release v1.0.4");
             }
         }
     }

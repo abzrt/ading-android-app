@@ -5,8 +5,7 @@ plugins {
 def versionPropsFile = file('version.properties')
 def versionMajor = 1
 def versionMinor = 0
-def versionPatch = 2
-def versionBuild = 2
+def versionPatch = 4
 
 if (versionPropsFile.canRead()) {
     Properties versionProps = new Properties()
@@ -14,15 +13,13 @@ if (versionPropsFile.canRead()) {
     versionMajor = versionProps['VERSION_MAJOR'].toInteger()
     versionMinor = versionProps['VERSION_MINOR'].toInteger()
     versionPatch = versionProps['VERSION_PATCH'].toInteger()
-    versionBuild = versionProps['BUILD_NUMBER'].toInteger()
 
     def runTasks = gradle.startParameter.taskNames
     if (runTasks.any { it.toLowerCase().contains("release") }) {
         versionPatch += 1
-        versionBuild += 1
         versionProps['VERSION_PATCH'] = versionPatch.toString()
-        versionProps['BUILD_NUMBER'] = versionBuild.toString()
-        versionPropsFile.withOutputStream { versionProps.store(it, "Auto-incremented release build number") }
+        versionProps.remove('BUILD_NUMBER')
+        versionPropsFile.withOutputStream { versionProps.store(it, "Auto-incremented release version") }
     }
 }
 
@@ -34,10 +31,10 @@ android {
         applicationId = "id.web.ading"
         minSdk = 24
         targetSdk = 35
-        versionCode = versionBuild
+        versionCode = versionPatch
         versionName = "${versionMajor}.${versionMinor}.${versionPatch}"
 
-        base.archivesName = "Ading Mobile-v${versionName}-build${versionCode}"
+        base.archivesName = "Ading Mobile-v${versionName}"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -83,7 +80,7 @@ afterEvaluate {
     tasks.named("assembleRelease").configure {
         doLast {
             def releaseDir = file("${buildDir}/outputs/apk/release")
-            def apkFile = new File(releaseDir, "Ading Mobile-v${android.defaultConfig.versionName}-build${android.defaultConfig.versionCode}-release.apk")
+            def apkFile = new File(releaseDir, "Ading Mobile-v${android.defaultConfig.versionName}-release.apk")
             if (apkFile.exists()) {
                 copy {
                     from apkFile
