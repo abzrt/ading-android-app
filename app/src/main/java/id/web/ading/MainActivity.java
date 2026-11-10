@@ -4,6 +4,7 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -20,6 +21,7 @@ import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.GeolocationPermissions;
+import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
@@ -73,6 +75,9 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private ActivityResultLauncher<String[]> locationPermissionLauncher;
     private ActivityResultLauncher<String> notificationPermissionLauncher;
+    private ActivityResultLauncher<String> cameraPermissionLauncher;
+    private PermissionRequest pendingWebPermissionRequest;
+    private boolean pendingFileChooserAfterCamera = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -130,9 +135,16 @@ public class MainActivity extends AppCompatActivity {
                     if (filePathCallback == null) return;
                     Uri[] results = null;
                     if (result.getResultCode() == RESULT_OK) {
-                        if (result.getData() == null || result.getData().getData() == null) {
+                        if (result.getData() == null || (result.getData().getData() == null && result.getData().getClipData() == null)) {
                             if (cameraImageUri != null && tempPhotoFile != null && tempPhotoFile.length() > 0) {
                                 results = new Uri[]{cameraImageUri};
+                            }
+                        } else if (result.getData().getClipData() != null) {
+                            ClipData clipData = result.getData().getClipData();
+                            int count = clipData.getItemCount();
+                            results = new Uri[count];
+                            for (int i = 0; i < count; i++) {
+                                results[i] = clipData.getItemAt(i).getUri();
                             }
                         } else {
                             String dataString = result.getData().getDataString();
@@ -152,10 +164,10 @@ public class MainActivity extends AppCompatActivity {
         locationPermissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.RequestMultiplePermissions(),
                 permissions -> {
-                    boolean granted = true;
+                    boolean granted = false;
                     for (Boolean val : permissions.values()) {
-                        if (!val) {
-                            granted = false;
+                        if (Boolean.TRUE.equals(val)) {
+                            granted = true;
                             break;
                         }
                     }
@@ -169,6 +181,24 @@ public class MainActivity extends AppCompatActivity {
                 new ActivityResultContracts.RequestPermission(),
                 isGranted -> {
                     // Handled notification permission result
+                }
+        );
+
+        cameraPermissionLauncher = registerForActivityResult(
+                new ActivityResultContracts.RequestPermission(),
+                isGranted -> {
+                    if (pendingWebPermissionRequest != null) {
+                        if (isGranted) {
+                            pendingWebPermissionRequest.grant(pendingWebPermissionRequest.getResources());
+                        } else {
+                            pendingWebPermissionRequest.deny();
+                        }
+                        pendingWebPermissionRequest = null;
+                    }
+                    if (pendingFileChooserAfterCamera) {
+                        pendingFileChooserAfterCamera = false;
+                        launchFileChooserIntent();
+                    }
                 }
         );
     }
@@ -303,52 +333,35 @@ public class MainActivity extends AppCompatActivity {
                 }
                 MainActivity.this.filePathCallback = filePathCallback;
 
-                Intent takePictureIntent = null;
-                // Check camera permission if user wants to take photo
-                boolean canUseCamera = ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-                if (canUseCamera) {
-                    takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                    try {
-                        tempPhotoFile = createImageFile();
-                        cameraImageUri = FileProvider.getUriForFile(
-                                MainActivity.this,
-                                getApplicationContext().getPackageName() + ".fileprovider",
-                                tempPhotoFile
-                        );
-                        takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri);
-                    } catch (IOException ex) {
-                        tempPhotoFile = null;
-                        cameraImageUri = null;
-                        takePictureIntent = null;
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    pendingFileChooserAfterCamera = true;
+                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+                    return true;
+                }
+
+                return launchFileChooserIntent();
+            }
+
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                String[] resources = request.getResources();
+                boolean needsCamera = false;
+                for (String resource : resources) {
+                    if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                        needsCamera = true;
+                        break;
                     }
                 }
-
-                Intent contentSelectionIntent = new Intent(Intent.ACTION_GET_CONTENT);
-                contentSelectionIntent.addCategory(Intent.CATEGORY_OPENABLE);
-                contentSelectionIntent.setType("*/*");
-
-                Intent[] intentArray;
-                if (takePictureIntent != null && cameraImageUri != null) {
-                    intentArray = new Intent[]{takePictureIntent};
+                if (needsCamera) {
+                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(resources);
+                    } else {
+                        pendingWebPermissionRequest = request;
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+                    }
                 } else {
-                    intentArray = new Intent[0];
+                    request.deny();
                 }
-
-                Intent chooserIntent = new Intent(Intent.ACTION_CHOOSER);
-                chooserIntent.putExtra(Intent.EXTRA_INTENT, contentSelectionIntent);
-                chooserIntent.putExtra(Intent.EXTRA_TITLE, "Pilih Berkas atau Foto");
-                if (intentArray.length > 0) {
-                    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, intentArray);
-                }
-
-                try {
-                    fileChooserLauncher.launch(chooserIntent);
-                } catch (ActivityNotFoundException e) {
-                    MainActivity.this.filePathCallback = null;
-                    Toast.makeText(MainActivity.this, "Tidak ada aplikasi pemilih berkas yang tersedia", Toast.LENGTH_SHORT).show();
-                    return false;
-                }
-                return true;
             }
 
             @Override
@@ -356,7 +369,10 @@ public class MainActivity extends AppCompatActivity {
                 geolocationOrigin = origin;
                 geolocationCallback = callback;
 
-                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                boolean hasFine = ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+                boolean hasCoarse = ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+
+                if (!hasFine && !hasCoarse) {
                     locationPermissionLauncher.launch(new String[]{
                             Manifest.permission.ACCESS_FINE_LOCATION,
                             Manifest.permission.ACCESS_COARSE_LOCATION
@@ -430,7 +446,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // 3. Known Safe Communication Protocols
-        if (url.startsWith("tel:") || url.startsWith("mailto:") || url.startsWith("sms:") || url.startsWith("whatsapp:")) {
+        if (url.startsWith("tel:") || url.startsWith("mailto:") || url.startsWith("sms:") || url.startsWith("whatsapp:") || url.startsWith("geo:")) {
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, uri);
                 startActivity(intent);
@@ -453,6 +469,58 @@ public class MainActivity extends AppCompatActivity {
         }
 
         return false;
+    }
+
+    private boolean launchFileChooserIntent() {
+        Intent takePictureIntent = null;
+        boolean canUseCamera = ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        if (canUseCamera) {
+            takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            try {
+                tempPhotoFile = createImageFile();
+                cameraImageUri = FileProvider.getUriForFile(
+                        MainActivity.this,
+                        getApplicationContext().getPackageName() + ".fileprovider",
+                        tempPhotoFile
+                );
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri);
+            } catch (IOException ex) {
+                tempPhotoFile = null;
+                cameraImageUri = null;
+                takePictureIntent = null;
+            }
+        }
+
+        Intent contentSelectionIntent = new Intent(Intent.ACTION_GET_CONTENT);
+        contentSelectionIntent.addCategory(Intent.CATEGORY_OPENABLE);
+        contentSelectionIntent.setType("*/*");
+        contentSelectionIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+
+        Intent[] intentArray;
+        if (takePictureIntent != null && cameraImageUri != null) {
+            intentArray = new Intent[]{takePictureIntent};
+        } else {
+            intentArray = new Intent[0];
+        }
+
+        Intent chooserIntent = new Intent(Intent.ACTION_CHOOSER);
+        chooserIntent.putExtra(Intent.EXTRA_INTENT, contentSelectionIntent);
+        chooserIntent.putExtra(Intent.EXTRA_TITLE, "Pilih Berkas atau Foto");
+        if (intentArray.length > 0) {
+            chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, intentArray);
+        }
+
+        try {
+            fileChooserLauncher.launch(chooserIntent);
+        } catch (ActivityNotFoundException e) {
+            if (MainActivity.this.filePathCallback != null) {
+                MainActivity.this.filePathCallback.onReceiveValue(null);
+                MainActivity.this.filePathCallback = null;
+            }
+            Toast.makeText(MainActivity.this, "Tidak ada aplikasi pemilih berkas yang tersedia", Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        return true;
     }
 
     private File createImageFile() throws IOException {
