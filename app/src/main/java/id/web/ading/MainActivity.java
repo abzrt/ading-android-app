@@ -96,9 +96,11 @@ public class MainActivity extends AppCompatActivity {
         View rootLayout = findViewById(R.id.rootLayout);
         if (rootLayout != null) {
             ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, windowInsets) -> {
-                Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
-                v.setPadding(insets.left, insets.top, insets.right, insets.bottom);
-                return WindowInsetsCompat.CONSUMED;
+                Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+                Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+                int bottomPadding = Math.max(bars.bottom, ime.bottom);
+                v.setPadding(bars.left, bars.top, bars.right, bottomPadding);
+                return windowInsets;
             });
         }
 
