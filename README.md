@@ -2,16 +2,6 @@
 
 Aplikasi Android resmi pembungkus (WebView wrapper) untuk **ADING** (Aplikasi Dashboard & Monitoring Operasional Telkom Akses Branch Banjarmasin - https://ading.web.id/).
 
----
-
-## 📱 File APK Siap Pakai
-
-File installer APK yang sudah di-build dengan standar keamanan Google Play Store:
-- **Lokasi file APK:**
-  `C:\Users\user\.gemini\antigravity\scratch\ading-android-app\ADING.apk`
-
----
-
 ## 🛡️ Standar Keamanan Google Play Store yang Telah Diterapkan
 
 1. **Network Security Config & HTTPS Enforcement:**
