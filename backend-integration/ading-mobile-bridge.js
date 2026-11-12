@@ -43,4 +43,3 @@ window.AdingMobileBridge = {
         }
     }
 };
-

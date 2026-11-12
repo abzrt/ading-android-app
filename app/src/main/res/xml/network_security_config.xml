@@ -9,11 +9,6 @@
 
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">ading.web.id</domain>
-        <domain includeSubdomains="true">flow.telkomakses.co.id</domain>
-        <domain includeSubdomains="true">telkomakses.co.id</domain>
-        <domain includeSubdomains="true">hebitpro-kaltara.ops.web.id</domain>
-        <domain includeSubdomains="true">ops.web.id</domain>
-        <domain includeSubdomains="true">api.telegram.org</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
