@@ -200,10 +200,13 @@ public class WfmFlowAutomationManager {
             ensureBgNotificationChannel(context);
             NotificationCompat.Builder b = new NotificationCompat.Builder(context, BG_CHANNEL_ID)
                     .setSmallIcon(R.mipmap.ic_launcher)
+                    .setColor(Color.parseColor("#F9010F"))
+                    .setSubText("Ading Mobile • Dispatch")
                     .setContentTitle(title)
                     .setContentText(message)
+                    .setStyle(new NotificationCompat.BigTextStyle().setBigContentTitle(title).bigText(message))
                     .setOngoing(ongoing)
-                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setPriority(ongoing ? NotificationCompat.PRIORITY_LOW : NotificationCompat.PRIORITY_HIGH)
                     .setOnlyAlertOnce(true);
             if (ongoing) {
                 b.setProgress(0, 0, true);
@@ -218,6 +221,115 @@ public class WfmFlowAutomationManager {
             NotificationManagerCompat.from(context).cancel(NOTIF_PROGRESS_ID);
         } catch (Exception ignored) {
         }
+    }
+
+    /**
+     * Handles failure gracefully with specific attribution to either FLOW or HebitPro.
+     */
+    private static void handlePipelineFailure(Activity activity, String targetWeb, String detailMessage, Runnable cleanup) {
+        if (activity == null || activity.isFinishing()) return;
+        mainHandler.post(() -> {
+            if (cleanup != null) {
+                cleanup.run();
+            }
+            cancelProgressNotification(activity);
+            updateProgressNotification(activity, "❌ Gagal: " + targetWeb, detailMessage, false);
+            Toast.makeText(activity, "❌ Gagal di " + targetWeb + ": " + detailMessage, Toast.LENGTH_LONG).show();
+            showAdingStyledErrorDialog(activity, targetWeb, detailMessage);
+        });
+    }
+
+    /**
+     * Shows an ADING-styled Dialog informing the user which website failed and why.
+     */
+    private static void showAdingStyledErrorDialog(Activity activity, String targetWeb, String detailMessage) {
+        if (activity == null || activity.isFinishing()) return;
+        mainHandler.post(() -> {
+            try {
+                AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+
+                LinearLayout container = new LinearLayout(activity);
+                container.setOrientation(LinearLayout.VERTICAL);
+                int pad = dp(activity, 20);
+                container.setPadding(pad, pad, pad, pad);
+                container.setBackgroundColor(Color.WHITE);
+
+                // Header with red accent bar
+                LinearLayout headerRow = new LinearLayout(activity);
+                headerRow.setOrientation(LinearLayout.HORIZONTAL);
+                headerRow.setGravity(Gravity.CENTER_VERTICAL);
+
+                View accentPill = new View(activity);
+                accentPill.setBackgroundColor(Color.parseColor("#F9010F"));
+                LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(dp(activity, 4), dp(activity, 22));
+                pillLp.setMargins(0, 0, dp(activity, 10), 0);
+                accentPill.setLayoutParams(pillLp);
+                headerRow.addView(accentPill);
+
+                TextView tvTitle = new TextView(activity);
+                tvTitle.setText("Gagal Terhubung: " + targetWeb);
+                tvTitle.setTextSize(16f);
+                tvTitle.setTypeface(null, Typeface.BOLD);
+                tvTitle.setTextColor(Color.parseColor("#111827"));
+                headerRow.addView(tvTitle);
+                container.addView(headerRow);
+
+                TextView tvMessage = new TextView(activity);
+                tvMessage.setText(detailMessage);
+                tvMessage.setTextSize(13f);
+                tvMessage.setTextColor(Color.parseColor("#4B5563"));
+                tvMessage.setPadding(0, dp(activity, 14), 0, dp(activity, 18));
+                container.addView(tvMessage);
+
+                LinearLayout btnRow = new LinearLayout(activity);
+                btnRow.setOrientation(LinearLayout.HORIZONTAL);
+                btnRow.setGravity(Gravity.END);
+
+                Button btnDismiss = new Button(activity);
+                btnDismiss.setText("Tutup");
+                btnDismiss.setTextColor(Color.parseColor("#4B5563"));
+                btnDismiss.setBackgroundColor(Color.parseColor("#F3F4F6"));
+                btnDismiss.setAllCaps(false);
+                LinearLayout.LayoutParams dismissLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                dismissLp.setMargins(0, 0, dp(activity, 8), 0);
+                btnDismiss.setLayoutParams(dismissLp);
+
+                builder.setView(container);
+                builder.setCancelable(true);
+                AlertDialog dialog = builder.create();
+
+                btnDismiss.setOnClickListener(v -> dialog.dismiss());
+                btnRow.addView(btnDismiss);
+
+                if (targetWeb.contains("HebitPro")) {
+                    Button btnLogin = new Button(activity);
+                    btnLogin.setText("🔑 Buka Sesi HebitPro");
+                    btnLogin.setTextColor(Color.WHITE);
+                    btnLogin.setBackgroundColor(Color.parseColor("#002E7A"));
+                    btnLogin.setAllCaps(false);
+                    btnLogin.setOnClickListener(v -> {
+                        dialog.dismiss();
+                        openSessionHelperDialog(activity, HEBITPRO_TASK_ORDER_URL, "🔑 Sesi Login HebitPro Kaltara");
+                    });
+                    btnRow.addView(btnLogin);
+                } else if (targetWeb.contains("FLOW")) {
+                    Button btnLogin = new Button(activity);
+                    btnLogin.setText("🔑 Buka Sesi FLOW");
+                    btnLogin.setTextColor(Color.WHITE);
+                    btnLogin.setBackgroundColor(Color.parseColor("#F9010F"));
+                    btnLogin.setAllCaps(false);
+                    btnLogin.setOnClickListener(v -> {
+                        dialog.dismiss();
+                        openSessionHelperDialog(activity, FLOW_WORKORDER_URL, "🔑 Sesi Login FLOW Telkom Akses");
+                    });
+                    btnRow.addView(btnLogin);
+                }
+
+                container.addView(btnRow);
+                dialog.show();
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     public static void onPageLoaded(WebView webView, String url) {
@@ -535,6 +647,14 @@ public class WfmFlowAutomationManager {
                 }
 
                 @Override
+                public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                    super.onReceivedError(view, errorCode, description, failingUrl);
+                    if (failingUrl == null || failingUrl.equals("about:blank") || isFinished[0]) return;
+                    String targetWeb = failingUrl.contains("flow.telkomakses") ? "FLOW Telkom Akses" : (failingUrl.contains("hebitpro") ? "HebitPro Kaltara" : "Web Server");
+                    handlePipelineFailure(activity, targetWeb, "Koneksi ke " + targetWeb + " terputus: " + description + " (Kode " + errorCode + "). Periksa jaringan Anda.", cleanup);
+                }
+
+                @Override
                 public void onPageFinished(WebView view, String url) {
                     super.onPageFinished(view, url);
                     persistCookies(activity);
@@ -545,8 +665,12 @@ public class WfmFlowAutomationManager {
                     } else if (url.contains("hebitpro-kaltara.ops.web.id")) {
                         injectDesktopViewport(view);
                         if (url.contains("/login")) {
-                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [2/2] Login otomatis ke HebitPro (" + hebitUser + ")...", true);
-                            injectHebitAutoLoginScript(view, hebitUser, hebitPass);
+                            handlePipelineFailure(
+                                    activity,
+                                    "HebitPro Kaltara",
+                                    "Sesi login HebitPro belum aktif atau sudah kadaluarsa (Perlu verifikasi captcha). Silakan klik [Buka Sesi HebitPro] untuk login sekali.",
+                                    cleanup
+                            );
                         } else if (!url.contains("/task-order")) {
                             view.loadUrl(HEBITPRO_TASK_ORDER_URL);
                         } else {
@@ -614,8 +738,12 @@ public class WfmFlowAutomationManager {
     ) {
         if (isFinished[0] || flowSsCaptured[0] || attempt > 85) {
             if (attempt > 85 && !flowSsCaptured[0] && !isFinished[0]) {
-                updateProgressNotification(activity, "⚠️ Timeout FLOW", "Tidak dapat menyelesaikan proses FLOW dalam 30 detik", false);
-                cleanup.run();
+                handlePipelineFailure(
+                        activity,
+                        "FLOW Telkom Akses",
+                        "Waktu habis (Timeout 30 detik) saat memproses data di FLOW Telkom Akses. Tidak dapat menemukan Workorder atau sesi login kadaluarsa.",
+                        cleanup
+                );
             }
             return;
         }
@@ -839,51 +967,97 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * Shows a clean 6-digit OTP input dialog directly on top of the active Activity.
+     * Shows a clean 6-digit OTP input dialog with ADING's visual design.
      * When entered, it submits the OTP directly into the background WebView waiting on /otp.
      */
     private static void showOtpInputDialog(Activity activity, WebView bgWebView, String noSc, boolean[] isWaitingForOtp, Runnable onCancel) {
         if (activity == null || activity.isFinishing()) return;
         mainHandler.post(() -> {
-            AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-            builder.setTitle("📲 Masukkan Kode OTP FLOW");
-            builder.setMessage("Kode OTP telah dikirimkan oleh FLOW ke Telegram Anda.\n\nMasukkan 6 digit kode OTP:");
+            try {
+                AlertDialog.Builder builder = new AlertDialog.Builder(activity);
 
-            LinearLayout layout = new LinearLayout(activity);
-            layout.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(activity, 20);
-            layout.setPadding(pad, dp(activity, 10), pad, 0);
+                LinearLayout root = new LinearLayout(activity);
+                root.setOrientation(LinearLayout.VERTICAL);
+                int pad = dp(activity, 20);
+                root.setPadding(pad, pad, pad, pad);
+                root.setBackgroundColor(Color.WHITE);
 
-            final EditText etOtp = new EditText(activity);
-            etOtp.setInputType(InputType.TYPE_CLASS_NUMBER);
-            etOtp.setHint("123456");
-            etOtp.setTextSize(24f);
-            etOtp.setTypeface(null, Typeface.BOLD);
-            etOtp.setTextColor(Color.parseColor("#F9010F"));
-            etOtp.setGravity(Gravity.CENTER);
-            etOtp.setBackgroundColor(Color.parseColor("#F3F4F6"));
-            etOtp.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
-            layout.addView(etOtp);
+                // ADING Header with red accent pill
+                LinearLayout headerRow = new LinearLayout(activity);
+                headerRow.setOrientation(LinearLayout.HORIZONTAL);
+                headerRow.setGravity(Gravity.CENTER_VERTICAL);
 
-            builder.setView(layout);
-            builder.setCancelable(false);
-            builder.setPositiveButton("✅ Verifikasi & Lanjut", null);
-            builder.setNegativeButton("Batal", (d, w) -> {
-                d.dismiss();
-                isWaitingForOtp[0] = false;
-                if (onCancel != null) onCancel.run();
-                cancelProgressNotification(activity);
-                Toast.makeText(activity, "Otomasi FLOW dibatalkan.", Toast.LENGTH_SHORT).show();
-            });
+                View accentPill = new View(activity);
+                accentPill.setBackgroundColor(Color.parseColor("#F9010F"));
+                LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(dp(activity, 4), dp(activity, 22));
+                pillLp.setMargins(0, 0, dp(activity, 10), 0);
+                accentPill.setLayoutParams(pillLp);
+                headerRow.addView(accentPill);
 
-            AlertDialog dialog = builder.create();
-            dialog.setOnShowListener(d -> {
-                if (dialog.getWindow() != null) {
-                    dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-                }
-                etOtp.requestFocus();
+                TextView tvTitle = new TextView(activity);
+                tvTitle.setText("Verifikasi OTP FLOW Telkom");
+                tvTitle.setTextSize(16f);
+                tvTitle.setTypeface(null, Typeface.BOLD);
+                tvTitle.setTextColor(Color.parseColor("#111827"));
+                headerRow.addView(tvTitle);
+                root.addView(headerRow);
 
-                Button btnSubmit = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                TextView tvMsg = new TextView(activity);
+                tvMsg.setText("Kode OTP telah dikirimkan oleh sistem FLOW ke Telegram Anda.\nMasukkan 6 digit kode OTP:");
+                tvMsg.setTextSize(13f);
+                tvMsg.setTextColor(Color.parseColor("#4B5563"));
+                tvMsg.setPadding(0, dp(activity, 12), 0, dp(activity, 14));
+                root.addView(tvMsg);
+
+                final EditText etOtp = new EditText(activity);
+                etOtp.setInputType(InputType.TYPE_CLASS_NUMBER);
+                etOtp.setHint("123456");
+                etOtp.setTextSize(26f);
+                etOtp.setTypeface(null, Typeface.BOLD);
+                etOtp.setTextColor(Color.parseColor("#F9010F"));
+                etOtp.setGravity(Gravity.CENTER);
+                etOtp.setBackgroundColor(Color.parseColor("#F3F4F6"));
+                etOtp.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
+                root.addView(etOtp);
+
+                LinearLayout btnRow = new LinearLayout(activity);
+                btnRow.setOrientation(LinearLayout.HORIZONTAL);
+                btnRow.setGravity(Gravity.END);
+                btnRow.setPadding(0, dp(activity, 18), 0, 0);
+
+                Button btnCancel = new Button(activity);
+                btnCancel.setText("Batal");
+                btnCancel.setTextColor(Color.parseColor("#4B5563"));
+                btnCancel.setBackgroundColor(Color.parseColor("#F3F4F6"));
+                btnCancel.setAllCaps(false);
+                LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cancelLp.setMargins(0, 0, dp(activity, 8), 0);
+                btnCancel.setLayoutParams(cancelLp);
+                btnRow.addView(btnCancel);
+
+                Button btnSubmit = new Button(activity);
+                btnSubmit.setText("✅ Verifikasi & Lanjut");
+                btnSubmit.setTextColor(Color.WHITE);
+                btnSubmit.setBackgroundColor(Color.parseColor("#F9010F"));
+                btnSubmit.setAllCaps(false);
+                btnSubmit.setTypeface(null, Typeface.BOLD);
+                btnRow.addView(btnSubmit);
+
+                root.addView(btnRow);
+
+                builder.setView(root);
+                builder.setCancelable(false);
+
+                AlertDialog dialog = builder.create();
+
+                btnCancel.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    isWaitingForOtp[0] = false;
+                    if (onCancel != null) onCancel.run();
+                    cancelProgressNotification(activity);
+                    Toast.makeText(activity, "Otomasi FLOW dibatalkan.", Toast.LENGTH_SHORT).show();
+                });
+
                 btnSubmit.setOnClickListener(v -> {
                     String otpCode = etOtp.getText().toString().trim();
                     if (otpCode.length() < 4) {
@@ -921,9 +1095,17 @@ public class WfmFlowAutomationManager {
                         isWaitingForOtp[0] = false;
                     });
                 });
-            });
 
-            dialog.show();
+                dialog.setOnShowListener(d -> {
+                    if (dialog.getWindow() != null) {
+                        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                    }
+                    etOtp.requestFocus();
+                });
+
+                dialog.show();
+            } catch (Exception ignored) {
+            }
         });
     }
 
@@ -946,10 +1128,14 @@ public class WfmFlowAutomationManager {
             Runnable cleanup,
             int attempt
     ) {
-        if (isFinished[0] || attempt > 40) {
-            if (attempt > 40 && !isFinished[0]) {
-                updateProgressNotification(activity, "⚠️ Timeout HebitPro", "Form assign belum selesai dalam 20 detik", false);
-                cleanup.run();
+        if (isFinished[0] || attempt > 80) {
+            if (attempt > 80 && !isFinished[0]) {
+                handlePipelineFailure(
+                        activity,
+                        "HebitPro Kaltara",
+                        "Waktu habis (Timeout 35 detik) saat mencari order " + noSc + " atau membuka form assign di HebitPro Kaltara.",
+                        cleanup
+                );
             }
             return;
         }
@@ -1052,8 +1238,17 @@ public class WfmFlowAutomationManager {
                 "var lngVal = '" + safeLng + "';" +
                 "var b64Png = '" + safeB64 + "';" +
 
-                "var swalConfirm = document.querySelector('.swal2-popup.swal2-show button.swal2-confirm, .swal2-container button.swal2-confirm');" +
-                "if(swalConfirm && swalConfirm.offsetParent !== null){" +
+                "var swalConfirm = document.querySelector('.swal2-popup button.swal2-confirm, .swal2-container button.swal2-confirm, button.swal2-confirm, .swal-button--confirm');" +
+                "if(!swalConfirm){" +
+                "  var allSwalBtns = document.querySelectorAll('.swal2-popup button, .swal2-container button, .sweet-alert button');" +
+                "  for(var sb=0; sb<allSwalBtns.length; sb++){" +
+                "    var st = (allSwalBtns[sb].innerText || allSwalBtns[sb].textContent || '').trim().toLowerCase();" +
+                "    if(st === 'assign' || st === 'ya' || st.indexOf('lanjut') !== -1){" +
+                "      swalConfirm = allSwalBtns[sb]; break;" +
+                "    }" +
+                "  }" +
+                "}" +
+                "if(swalConfirm){" +
                 "  swalConfirm.click();" +
                 "  return 'SWAL_CONFIRMED';" +
                 "}" +
@@ -1199,26 +1394,29 @@ public class WfmFlowAutomationManager {
                 "  return 'DONE_SUBMITTED';" +
                 "}" +
 
-                "var searchTarget = noSc || wonum;" +
+                "var searchTarget = (noSc || wonum || '').trim();" +
                 "if(searchTarget && window.__adingHebitSearched !== searchTarget){" +
+                "  window.__adingHebitSearched = searchTarget;" +
                 "  if(window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable){" +
                 "    try {" +
                 "      var dtApi = window.jQuery.fn.dataTable.tables({api:true});" +
-                "      if(dtApi && dtApi.search){" +
-                "        window.__adingHebitSearched = searchTarget;" +
-                "        dtApi.search(searchTarget).draw();" +
-                "      }" +
+                "      if(dtApi && dtApi.search){ dtApi.search(searchTarget).draw(); }" +
                 "    } catch(e){}" +
                 "  }" +
                 "  var sInp = document.querySelector('input[type=\"search\"], .dataTables_filter input');" +
-                "  if(sInp && sInp.value !== searchTarget){" +
-                "    window.__adingHebitSearched = searchTarget;" +
+                "  if(sInp){" +
                 "    sInp.value = searchTarget;" +
                 "    sInp.dispatchEvent(new Event('input', {bubbles:true}));" +
                 "    sInp.dispatchEvent(new Event('change', {bubbles:true}));" +
                 "    sInp.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', keyCode:13, bubbles:true}));" +
-                "    return 'SEARCHED_TABLE';" +
                 "  }" +
+                "  return 'SEARCHED_TABLE';" +
+                "}" +
+
+                "if(window.__adingToTeknisiClickTime && (Date.now() - window.__adingToTeknisiClickTime) > 4000){" +
+                "  var oldClicked = document.querySelectorAll('[data-ading-to-teknisi-clicked]');" +
+                "  for(var oc=0; oc<oldClicked.length; oc++){ delete oldClicked[oc].dataset.adingToTeknisiClicked; }" +
+                "  delete window.__adingToTeknisiClickTime;" +
                 "}" +
 
                 "var rows = document.querySelectorAll('table tbody tr');" +
@@ -1226,13 +1424,16 @@ public class WfmFlowAutomationManager {
                 "  var rTxt = (rows[r].innerText || '').toLowerCase();" +
                 "  var matchSc = noSc && rTxt.indexOf(noSc.toLowerCase()) !== -1;" +
                 "  var matchWo = wonum && rTxt.indexOf(wonum.toLowerCase()) !== -1;" +
-                "  if(matchSc || matchWo){" +
+                "  var singleMatch = (rows.length === 1 && rTxt.indexOf('no data') === -1 && rTxt.indexOf('tidak') === -1 && rTxt.indexOf('loading') === -1 && rTxt.trim().length > 10);" +
+                "  if(matchSc || matchWo || singleMatch){" +
                 "    var rowBtns = rows[r].querySelectorAll('button, a');" +
                 "    for(var b=0; b<rowBtns.length; b++){" +
-                "      var bTxt = (rowBtns[b].innerText || rowBtns[b].title || '').toLowerCase();" +
-                "      if(bTxt.indexOf('teknisi') !== -1 || bTxt.indexOf('assign') !== -1 || rowBtns[b].querySelector('.fa-paper-plane, .bi-send')){" +
+                "      var bTxt = (rowBtns[b].innerText || rowBtns[b].title || '').toLowerCase().replace(/\\s+/g, ' ');" +
+                "      var hasTelegramIcon = rowBtns[b].querySelector('.fa-telegram, .fa-telegram-plane, .fa-paper-plane, .bi-send, .bi-telegram') !== null;" +
+                "      if(bTxt.indexOf('teknisi') !== -1 || bTxt.indexOf('assign') !== -1 || (bTxt.indexOf('to') !== -1 && bTxt.indexOf('teknisi') !== -1) || hasTelegramIcon){" +
                 "        if(!rowBtns[b].dataset.adingToTeknisiClicked){" +
                 "          rowBtns[b].dataset.adingToTeknisiClicked = '1';" +
+                "          window.__adingToTeknisiClickTime = Date.now();" +
                 "          rowBtns[b].click();" +
                 "          return 'CLICKED_TO_TEKNISI';" +
                 "        }" +
