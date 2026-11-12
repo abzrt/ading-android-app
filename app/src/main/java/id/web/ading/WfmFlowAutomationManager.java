@@ -119,7 +119,7 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * Persists FLOW and HebitPro session cookies into SharedPreferences so sessions survive app restarts
+     * Persists FLOW and HebitPro session cookies into SharedPreferences
      */
     public static void persistCookies(Context context) {
         if (context == null) return;
@@ -220,10 +220,6 @@ public class WfmFlowAutomationManager {
         }
     }
 
-    /**
-     * Called on page load in MainActivity's WebView.
-     * Hooks dispatch events on ading.web.id with ZERO visual modifications to keep ADING 100% authentic.
-     */
     public static void onPageLoaded(WebView webView, String url) {
         if (webView == null || url == null) return;
         restoreCookies(webView.getContext());
@@ -233,12 +229,6 @@ public class WfmFlowAutomationManager {
         }
     }
 
-    /**
-     * STAGE 1:
-     * Intercepts clicking "Dispatch" inside the "DISPATCH ORDER KE TEKNISI" modal on https://ading.web.id
-     * (/provisioning/undispatch and /provisioning/search-order).
-     * Captures NO_SC, WONUM, STO, PAKET, ODP, KORDINAT, Service Area, and Tim Teknisi (leader_nik & leader_name).
-     */
     private static void injectAdingDispatchInterceptor(WebView webView) {
         String js = "(function(){" +
                 "if(window.__adingDispatchHooked) return;" +
@@ -312,9 +302,6 @@ public class WfmFlowAutomationManager {
         webView.evaluateJavascript(js, null);
     }
 
-    /**
-     * Called when user clicks "Dispatch" in modal on https://ading.web.id
-     */
     public static void onAdingDispatchTriggered(Activity activity, String dispatchJson) {
         if (activity == null || activity.isFinishing()) return;
         try {
@@ -353,12 +340,12 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * RUNS 100% IN THE BACKGROUND:
-     * - Restores persistent cookies so OTP is only asked ONCE.
-     * - Opens FLOW (flow.telkomakses.co.id/workorder) directly with active session.
-     * - If session expired, asks for OTP ONCE via a clean native dialog and immediately resumes without failing.
-     * - Captures desktop screenshot of Workorder card & unmasked customer data.
-     * - Assigns in HebitPro (/task-order) and sends to Telegram via @hebitpro_bot.
+     * HIGH-SPEED BACKGROUND PIPELINE:
+     * - Restores persistent cookies so session is active immediately.
+     * - Fast-loop polls every 350ms, auto-submits login, fast-overrides SweetAlert timers.
+     * - Instantly shows native OTP dialog on screen when OTP is ready.
+     * - Once OTP is entered, immediately continues to /workorder, filters, crops screenshot,
+     *   and auto-assigns in HebitPro in 4-6 seconds total!
      */
     @SuppressLint("SetJavaScriptEnabled")
     public static void runFullDispatchToFlowAndHebitPipeline(
@@ -389,23 +376,20 @@ public class WfmFlowAutomationManager {
                     ? (leaderName + (!leaderNik.isEmpty() ? " (" + leaderNik + ")" : ""))
                     : (!namaTim.isEmpty() ? namaTim : "Teknisi");
 
-            // Non-intrusive feedback: Toast + Ongoing Progress Notification in Status Bar
             Toast.makeText(activity, "⚡ Memproses di background: FLOW WFM & HebitPro (" + noSc + ")", Toast.LENGTH_SHORT).show();
             updateProgressNotification(
                     activity,
                     "⚡ Dispatch Order: " + noSc,
-                    "[1/2] Mencari di FLOW Telkom Akses → " + techDisplay,
+                    "[1/2] Membuka FLOW Telkom Akses → " + techDisplay,
                     true
             );
 
-            // Locate rootLayout to host headless background WebView behind main view
             ViewGroup root = activity.findViewById(R.id.rootLayout);
             if (root == null) {
                 root = (ViewGroup) activity.findViewById(android.R.id.content);
             }
             if (root == null) return;
 
-            // Remove any old background worker view if still present
             View oldBg = root.findViewWithTag("TAG_WFM_BG_CONTAINER");
             if (oldBg != null) {
                 root.removeView(oldBg);
@@ -418,7 +402,6 @@ public class WfmFlowAutomationManager {
             RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(bgWidth, bgHeight);
             bgContainer.setLayoutParams(lp);
 
-            // Positioned behind MainActivity's SwipeRefreshLayout at index 0
             bgContainer.setFocusable(false);
             bgContainer.setFocusableInTouchMode(false);
             bgContainer.setClickable(false);
@@ -444,9 +427,8 @@ public class WfmFlowAutomationManager {
             cm.setAcceptThirdPartyCookies(bgWebView, true);
 
             bgContainer.addView(bgWebView);
-            root.addView(bgContainer, 0); // Placed at index 0 behind everything
+            root.addView(bgContainer, 0); // At index 0 behind everything
 
-            // Explicit measure and layout so width & height are immediate
             bgContainer.measure(
                     View.MeasureSpec.makeMeasureSpec(bgWidth, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(bgHeight, View.MeasureSpec.EXACTLY)
@@ -458,13 +440,12 @@ public class WfmFlowAutomationManager {
             );
             bgWebView.layout(0, 0, bgWidth, bgHeight);
 
-            // Background pipeline state
             final int[] currentStage = {1}; // 1 = FLOW, 2 = HEBITPRO
             final boolean[] flowSsCaptured = {false};
             final String[] capturedBase64Png = {""};
             final String[] resolvedWonum = {initialWonum != null ? initialWonum : ""};
             final boolean[] isFinished = {false};
-            final boolean[] otpDialogShown = {false};
+            final boolean[] isWaitingForOtp = {false};
 
             final ViewGroup finalRoot = root;
             Runnable cleanup = () -> {
@@ -483,7 +464,6 @@ public class WfmFlowAutomationManager {
                 });
             };
 
-            // Transition from Stage 1 (FLOW WFM Screenshot) to Stage 2 (HebitPro /task-order)
             Runnable captureFlowAndProceedToHebit = () -> {
                 if (flowSsCaptured[0] && currentStage[0] == 2) return;
                 flowSsCaptured[0] = true;
@@ -500,8 +480,6 @@ public class WfmFlowAutomationManager {
                         ByteArrayOutputStream bos = new ByteArrayOutputStream();
                         croppedBitmap.compress(Bitmap.CompressFormat.PNG, 92, bos);
                         capturedBase64Png[0] = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
-
-                        // Save to Gallery & Android Clipboard
                         saveBitmapToGalleryAndClipboard(activity, croppedBitmap, noSc);
                     }
 
@@ -522,7 +500,6 @@ public class WfmFlowAutomationManager {
                         extAddress = extractedJson.optString("service_address", "").trim();
                     }
 
-                    // Show local Android task notification
                     String aoWoLabel = noSc + (!resolvedWonum[0].isEmpty() ? " | " + resolvedWonum[0] : "");
                     new AdingNotificationBridge(activity).notifyTaskAssigned(
                             aoWoLabel,
@@ -540,7 +517,6 @@ public class WfmFlowAutomationManager {
                             !assignedBy.isEmpty() ? assignedBy : "AHMAD PAIDI"
                     );
 
-                    // Move to Stage 2: HebitPro /task-order
                     currentStage[0] = 2;
                     updateProgressNotification(
                             activity,
@@ -564,202 +540,105 @@ public class WfmFlowAutomationManager {
                     persistCookies(activity);
                     if (url == null || isFinished[0]) return;
 
-                    // ================= STAGE 1: FLOW TELKOM AKSES =================
                     if (url.contains("flow.telkomakses.co.id")) {
-                        if (url.contains("/unauthorize")) {
-                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Sesi FLOW kedaluwarsa, mengalihkan...", true);
-                            view.loadUrl(FLOW_LOGIN_URL);
-                            return;
-                        }
-                        if (url.contains("/otp")) {
-                            if (!otpDialogShown[0]) {
-                                otpDialogShown[0] = true;
-                                updateProgressNotification(activity, "📲 Masukkan OTP FLOW", "Buka dialog untuk verifikasi OTP", true);
-                                showOtpInputDialog(activity, view, noSc, cleanup);
-                            }
-                            return;
-                        }
-                        if (url.endsWith("flow.telkomakses.co.id/") || url.endsWith("flow.telkomakses.co.id") || url.contains("/login")) {
-                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Login otomatis ke FLOW (" + flowUser + ")...", true);
-                            injectFlowAutoLoginScript(view, flowUser, flowPass, true);
-                            return;
-                        }
-                        if (url.contains("/home") || url.contains("/dashboard")) {
-                            persistCookies(activity);
-                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✅ [1/2] Login FLOW sukses! Membuka /workorder...", true);
-                            view.loadUrl(FLOW_WORKORDER_URL);
-                            return;
-                        }
-                        if (url.contains("/workorder")) {
-                            persistCookies(activity);
-                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Filter SC Order no: " + noSc + " di FLOW...", true);
-                            injectDesktopViewport(view);
-                            runFlowFilterAndDetailLoop(
-                                    view,
-                                    isFinished,
-                                    noSc,
-                                    flowSsCaptured,
-                                    activity,
-                                    captureFlowAndProceedToHebit,
-                                    0
-                            );
-                        }
-                        return;
-                    }
-
-                    // ================= STAGE 2: HEBITPRO KALTARA =================
-                    if (url.contains("hebitpro-kaltara.ops.web.id")) {
+                        injectDesktopViewport(view);
+                    } else if (url.contains("hebitpro-kaltara.ops.web.id")) {
+                        injectDesktopViewport(view);
                         if (url.contains("/login")) {
                             updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [2/2] Login otomatis ke HebitPro (" + hebitUser + ")...", true);
                             injectHebitAutoLoginScript(view, hebitUser, hebitPass);
-                            return;
-                        }
-                        if (!url.contains("/task-order")) {
-                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🚀 [2/2] Membuka /task-order HebitPro...", true);
+                        } else if (!url.contains("/task-order")) {
                             view.loadUrl(HEBITPRO_TASK_ORDER_URL);
-                            return;
+                        } else {
+                            runHebitProTaskOrderLoop(
+                                    view,
+                                    isFinished,
+                                    activity,
+                                    noSc,
+                                    resolvedWonum[0],
+                                    leaderNik,
+                                    leaderName,
+                                    namaTim,
+                                    odp,
+                                    paket,
+                                    koordinat,
+                                    capturedBase64Png[0],
+                                    cleanup,
+                                    0
+                            );
                         }
-                        // On https://hebitpro-kaltara.ops.web.id/task-order
-                        injectDesktopViewport(view);
-                        updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✈️ [2/2] Mencari " + noSc + " & klik [To Teknisi]...", true);
-                        runHebitProTaskOrderLoop(
-                                view,
-                                isFinished,
-                                activity,
-                                noSc,
-                                resolvedWonum[0],
-                                leaderNik,
-                                leaderName,
-                                namaTim,
-                                odp,
-                                paket,
-                                koordinat,
-                                capturedBase64Png[0],
-                                cleanup,
-                                0
-                        );
                     }
                 }
             });
 
+            // Start master high-speed state loop
             bgWebView.loadUrl(FLOW_WORKORDER_URL);
+            runFlowPipelineFastLoop(
+                    bgWebView,
+                    isFinished,
+                    noSc,
+                    flowUser,
+                    flowPass,
+                    flowSsCaptured,
+                    isWaitingForOtp,
+                    activity,
+                    captureFlowAndProceedToHebit,
+                    cleanup,
+                    0
+            );
         });
     }
 
     /**
-     * Shows a clean 6-digit OTP input dialog directly on top of the active Activity.
-     * When entered, it submits the OTP directly into the background WebView waiting on /otp.
-     * Once verified, the session cookies are permanently saved and the pipeline continues automatically!
+     * UNIFIED HIGH-SPEED FLOW AUTOMATION LOOP (POLLS EVERY 350MS):
+     * Drives all states automatically:
+     * 1. Detects Workorder detail card -> triggers screenshot
+     * 2. Detects /workorder table -> filters SC Order and clicks row
+     * 3. Detects /otp or OTP input -> instantly shows native OTP dialog to user
+     * 4. Detects successful login AJAX response -> immediately bypasses 2s Swal and redirects to /otp
+     * 5. Detects login form -> fills credentials, adds Remember Me, and submits form
+     * 6. Detects /home or /dashboard -> immediately redirects to /workorder
      */
-    private static void showOtpInputDialog(Activity activity, WebView bgWebView, String noSc, Runnable onCancel) {
-        if (activity == null || activity.isFinishing()) return;
-        mainHandler.post(() -> {
-            AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-            builder.setTitle("📲 Masukkan Kode OTP FLOW");
-            builder.setMessage("Kode OTP telah dikirimkan oleh FLOW ke Telegram Anda.\n\nMasukkan 6 digit kode OTP sekali ini saja untuk mengaktifkan sesi permanen:");
-
-            LinearLayout layout = new LinearLayout(activity);
-            layout.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(activity, 20);
-            layout.setPadding(pad, dp(activity, 10), pad, 0);
-
-            final EditText etOtp = new EditText(activity);
-            etOtp.setInputType(InputType.TYPE_CLASS_NUMBER);
-            etOtp.setHint("123456");
-            etOtp.setTextSize(22f);
-            etOtp.setTypeface(null, Typeface.BOLD);
-            etOtp.setTextColor(Color.parseColor("#F9010F"));
-            etOtp.setGravity(Gravity.CENTER);
-            etOtp.setBackgroundColor(Color.parseColor("#F3F4F6"));
-            etOtp.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
-            layout.addView(etOtp);
-
-            builder.setView(layout);
-            builder.setCancelable(false);
-            builder.setPositiveButton("✅ Verifikasi & Simpan Sesi", null);
-            builder.setNegativeButton("Batal", (d, w) -> {
-                d.dismiss();
-                if (onCancel != null) onCancel.run();
-                cancelProgressNotification(activity);
-                Toast.makeText(activity, "Verifikasi OTP dibatalkan.", Toast.LENGTH_SHORT).show();
-            });
-
-            AlertDialog dialog = builder.create();
-            dialog.setOnShowListener(d -> {
-                if (dialog.getWindow() != null) {
-                    dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-                }
-                etOtp.requestFocus();
-
-                Button btnSubmit = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-                btnSubmit.setOnClickListener(v -> {
-                    String otpCode = etOtp.getText().toString().trim();
-                    if (otpCode.length() < 4) {
-                        Toast.makeText(activity, "Masukkan 6 digit kode OTP yang valid!", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    dialog.dismiss();
-                    Toast.makeText(activity, "Memverifikasi OTP FLOW...", Toast.LENGTH_SHORT).show();
-                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📲 Memverifikasi OTP FLOW Telegram...", true);
-
-                    // Inject OTP into the background WebView waiting on /otp
-                    String safeOtp = escapeJs(otpCode);
-                    String submitJs = "(function(){" +
-                            "var inp = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
-                            "if(inp){" +
-                            "  inp.focus();" +
-                            "  inp.value = '" + safeOtp + "';" +
-                            "  inp.dispatchEvent(new Event('input', {bubbles:true}));" +
-                            "  inp.dispatchEvent(new Event('change', {bubbles:true}));" +
-                            "  var form = document.getElementById('otpForm') || inp.closest('form');" +
-                            "  var btn = document.getElementById('signInButton') || (form ? form.querySelector('button[type=\"submit\"]') : null);" +
-                            "  if(btn){ btn.click(); return 'CLICKED_SIGN_IN'; }" +
-                            "  if(form){ form.dispatchEvent(new Event('submit', {bubbles:true, cancelable:true})); return 'SUBMITTED_FORM'; }" +
-                            "}" +
-                            "return 'OTP_INPUT_NOT_FOUND';" +
-                            "})();";
-                    bgWebView.evaluateJavascript(submitJs, res -> {
-                        // After valid OTP, FLOW will redirect to /home, where onPageFinished will persist cookies and load /workorder!
-                    });
-                });
-            });
-
-            dialog.show();
-        });
-    }
-
-    /**
-     * STAGE 2 LOOP (BACKGROUND):
-     * 1. Opens "Search Workorder Fulfillment" filter modal on https://flow.telkomakses.co.id/workorder
-     * 2. Enters noSc into "SC Order no:" input and clicks red "Apply" button
-     * 3. Clicks the matching row in the filtered table to open the Workorder detail view
-     * 4. Waits for the "Workorder" detail card to populate, then triggers screenshot crop
-     */
-    private static void runFlowFilterAndDetailLoop(
+    private static void runFlowPipelineFastLoop(
             WebView view,
             boolean[] isFinished,
             String noSc,
+            String flowUser,
+            String flowPass,
             boolean[] flowSsCaptured,
+            boolean[] isWaitingForOtp,
             Activity activity,
             Runnable onCardReady,
+            Runnable cleanup,
             int attempt
     ) {
-        if (isFinished[0] || flowSsCaptured[0] || attempt > 24) {
-            if (attempt > 24 && !flowSsCaptured[0] && !isFinished[0]) {
-                updateProgressNotification(activity, "⚠️ Timeout FLOW", "Detail SC " + noSc + " tidak muncul setelah 25 detik", false);
+        if (isFinished[0] || flowSsCaptured[0] || attempt > 85) {
+            if (attempt > 85 && !flowSsCaptured[0] && !isFinished[0]) {
+                updateProgressNotification(activity, "⚠️ Timeout FLOW", "Tidak dapat menyelesaikan proses FLOW dalam 30 detik", false);
+                cleanup.run();
             }
             return;
         }
 
         mainHandler.postDelayed(() -> {
             if (isFinished[0] || flowSsCaptured[0]) return;
+
+            // Pause polling while waiting for user to type OTP in the dialog
+            if (isWaitingForOtp[0]) {
+                runFlowPipelineFastLoop(view, isFinished, noSc, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
+                return;
+            }
+
             String safeSc = escapeJs(noSc);
+            String safeUser = escapeJs(flowUser);
+            String safePass = escapeJs(flowPass);
 
             String js = "(function(){" +
+                    "var path = window.location.pathname || '';" +
                     "var targetSc = '" + safeSc + "';" +
                     "var targetLower = targetSc.toLowerCase();" +
 
-                    // 1. Check if Workorder detail card is ALREADY visible & populated with our SC Order
+                    // 1. DETAIL CARD READY CHECK (Foto Ketiga)
                     "function getDetailVal(lbl){" +
                     "  var nodes = document.querySelectorAll('label, div, span, td');" +
                     "  for(var i=0; i<nodes.length; i++){" +
@@ -789,48 +668,44 @@ public class WfmFlowAutomationManager {
                     "  return 'DETAIL_CARD_READY:' + woDetailVal;" +
                     "}" +
 
-                    // 2. If filter was applied, look for table row & click it
-                    "if(window.__adingFlowFilterApplied === targetSc){" +
-                    "  var rows = document.querySelectorAll('table tbody tr');" +
-                    "  for(var r=0; r<rows.length; r++){" +
-                    "    var rTxt = (rows[r].innerText || '');" +
-                    "    if(rTxt.toLowerCase().indexOf(targetLower) !== -1 || (rows.length === 1 && rTxt.toUpperCase().indexOf('WO0') !== -1)){" +
-                    "      if(!rows[r].dataset.adingClicked){" +
-                    "        rows[r].dataset.adingClicked = '1';" +
-                    "        var clickTarget = rows[r].querySelector('a, button');" +
-                    "        if(!clickTarget){" +
-                    "          var tds = rows[r].querySelectorAll('td');" +
-                    "          for(var c=0; c<tds.length; c++){" +
-                    "            if((tds[c].innerText || '').trim().toUpperCase().indexOf('WO') === 0){ clickTarget = tds[c]; break; }" +
+                    // 2. ON /workorder TABLE: FILTER & CLICK ROW
+                    "if(path.indexOf('/workorder') !== -1){" +
+                    "  document.querySelectorAll('.modal-backdrop').forEach(function(b){ if(!document.querySelector('.modal.show')) b.remove(); });" +
+                    "  if(window.__adingFlowFilterApplied === targetSc){" +
+                    "    var rows = document.querySelectorAll('table tbody tr');" +
+                    "    for(var r=0; r<rows.length; r++){" +
+                    "      var rTxt = (rows[r].innerText || '');" +
+                    "      if(rTxt.toLowerCase().indexOf(targetLower) !== -1 || (rows.length === 1 && rTxt.toUpperCase().indexOf('WO0') !== -1)){" +
+                    "        if(!rows[r].dataset.adingClicked){" +
+                    "          rows[r].dataset.adingClicked = '1';" +
+                    "          var clickTarget = rows[r].querySelector('a, button');" +
+                    "          if(!clickTarget){" +
+                    "            var tds = rows[r].querySelectorAll('td');" +
+                    "            for(var c=0; c<tds.length; c++){" +
+                    "              if((tds[c].innerText || '').trim().toUpperCase().indexOf('WO') === 0){ clickTarget = tds[c]; break; }" +
+                    "            }" +
                     "          }" +
+                    "          if(clickTarget) clickTarget.click();" +
+                    "          rows[r].click();" +
+                    "          rows[r].dispatchEvent(new MouseEvent('dblclick', {bubbles:true}));" +
+                    "          return 'ROW_CLICKED';" +
                     "        }" +
-                    "        if(clickTarget) clickTarget.click();" +
-                    "        rows[r].click();" +
-                    "        rows[r].dispatchEvent(new MouseEvent('dblclick', {bubbles:true}));" +
-                    "        return 'ROW_CLICKED';" +
                     "      }" +
                     "    }" +
                     "  }" +
-                    "}" +
-
-                    // 3. Otherwise, open "Search Workorder Fulfillment" filter modal, fill "SC Order no:", and click "Apply"
-                    "if(window.__adingFlowFilterApplied !== targetSc){" +
-                    "  var scInput = null;" +
-                    "  var modalEl = null;" +
-                    "  var labels = document.querySelectorAll('label, div, span');" +
-                    "  for(var k=0; k<labels.length; k++){" +
-                    "    var lTxt = (labels[k].innerText || '').trim().toLowerCase();" +
-                    "    if(lTxt === 'sc order no:' || lTxt === 'sc order no'){" +
-                    "      var container = labels[k].parentElement;" +
-                    "      scInput = container ? container.querySelector('input:not([readonly]):not([disabled])') : null;" +
-                    "      if(!scInput && labels[k].nextElementSibling && labels[k].nextElementSibling.tagName === 'INPUT') scInput = labels[k].nextElementSibling;" +
-                    "      if(scInput){ modalEl = scInput.closest('.modal') || scInput.closest('form') || document; break; }" +
+                    "  var scInput = document.querySelector('input[placeholder*=\"SC Order\" i], input[name*=\"sc_order\" i], input[id*=\"sc_order\" i]');" +
+                    "  if(!scInput){" +
+                    "    var labels = document.querySelectorAll('label, div, span');" +
+                    "    for(var k=0; k<labels.length; k++){" +
+                    "      var lTxt = (labels[k].innerText || '').trim().toLowerCase();" +
+                    "      if(lTxt === 'sc order no:' || lTxt === 'sc order no'){" +
+                    "        var container = labels[k].parentElement;" +
+                    "        scInput = container ? container.querySelector('input:not([readonly]):not([disabled])') : null;" +
+                    "        if(scInput) break;" +
+                    "      }" +
                     "    }" +
                     "  }" +
-                    "  if(!scInput){" +
-                    "    scInput = document.querySelector('input[placeholder*=\"SC Order\" i]:not([readonly]), input[name*=\"sc_order\" i]:not([readonly]), input[id*=\"sc_order\" i]:not([readonly]), input[name*=\"scorder\" i]:not([readonly]), input[id*=\"scorder\" i]:not([readonly])');" +
-                    "    if(scInput) modalEl = scInput.closest('.modal') || document;" +
-                    "  }" +
+                    "  var modalEl = scInput ? (scInput.closest('.modal') || document) : null;" +
                     "  if(!scInput || (modalEl && modalEl.classList && modalEl.classList.contains('modal') && !modalEl.classList.contains('show'))){" +
                     "    var filterBtns = document.querySelectorAll('[data-bs-toggle=\"modal\"], [data-toggle=\"modal\"], button, a');" +
                     "    for(var b=0; b<filterBtns.length; b++){" +
@@ -867,13 +742,86 @@ public class WfmFlowAutomationManager {
                     "      }" +
                     "    }" +
                     "  }" +
+                    "  return 'ON_WORKORDER_PAGE';" +
                     "}" +
+
+                    // 3. CHECK IF ON /otp PAGE OR #otp INPUT PRESENT
+                    "var otpInput = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
+                    "if(path.indexOf('/otp') !== -1 || otpInput){" +
+                    "  if(localStorage.getItem('menus')){" +
+                    "    window.location.href = '/workorder';" +
+                    "    return 'REDIRECT_TO_WORKORDER';" +
+                    "  }" +
+                    "  return 'READY_FOR_OTP';" +
+                    "}" +
+
+                    // 4. CHECK IF LOGIN WAS SUBMITTED & USERNAME SET -> IMMEDIATELY JUMP TO /otp
+                    "if(localStorage.getItem('username') && path.indexOf('/otp') === -1){" +
+                    "  window.location.href = '/otp';" +
+                    "  return 'NAVIGATING_TO_OTP';" +
+                    "}" +
+
+                    // 5. CHECK IF ON LOGIN FORM: AUTO FILL & SUBMIT
+                    "var userInput = document.getElementById('inputEmail4') || document.querySelector('input[name=\"username\"]');" +
+                    "var passInput = document.getElementById('inputPassword4') || document.querySelector('input[name=\"password\"]');" +
+                    "if(userInput && passInput){" +
+                    "  if(!window.__adingLoginSubmitted){" +
+                    "    window.__adingLoginSubmitted = true;" +
+                    "    userInput.value = '" + safeUser + "';" +
+                    "    userInput.dispatchEvent(new Event('input', {bubbles:true}));" +
+                    "    userInput.dispatchEvent(new Event('change', {bubbles:true}));" +
+                    "    passInput.value = '" + safePass + "';" +
+                    "    passInput.dispatchEvent(new Event('input', {bubbles:true}));" +
+                    "    passInput.dispatchEvent(new Event('change', {bubbles:true}));" +
+                    "    var rem = document.getElementById('gridCheck');" +
+                    "    if(rem){" +
+                    "      rem.setAttribute('name', 'remember');" +
+                    "      rem.name = 'remember';" +
+                    "      rem.value = '1';" +
+                    "      rem.checked = true;" +
+                    "    }" +
+                    "    if(window.Swal){" +
+                    "      var origFire = window.Swal.fire;" +
+                    "      window.Swal.fire = function(){" +
+                    "        setTimeout(function(){ window.location.href = '/otp'; }, 50);" +
+                    "        return origFire.apply(this, arguments);" +
+                    "      };" +
+                    "    }" +
+                    "    var submitBtn = document.querySelector('#loginForm button[type=\"submit\"], button.btn-danger[type=\"submit\"]');" +
+                    "    if(submitBtn){ submitBtn.click(); }" +
+                    "    else {" +
+                    "      var lForm = document.getElementById('loginForm');" +
+                    "      if(lForm) lForm.dispatchEvent(new Event('submit', {bubbles:true, cancelable:true}));" +
+                    "    }" +
+                    "    return 'SUBMITTED_LOGIN';" +
+                    "  }" +
+                    "  return 'LOGIN_WAITING_RESPONSE';" +
+                    "}" +
+
+                    // 6. IF ON /home OR /dashboard, DIRECTLY OPEN /workorder
+                    "if(path.indexOf('/home') !== -1 || path.indexOf('/dashboard') !== -1){" +
+                    "  window.location.href = '/workorder';" +
+                    "  return 'NAVIGATING_TO_WORKORDER';" +
+                    "}" +
+
+                    // 7. IF ON /unauthorize, RETURN TO /
+                    "if(path.indexOf('/unauthorize') !== -1){" +
+                    "  window.location.href = '/';" +
+                    "  return 'NAVIGATING_TO_ROOT';" +
+                    "}" +
+
                     "return 'WAITING';" +
                     "})();";
 
             view.evaluateJavascript(js, result -> {
                 String res = result != null ? result.replace("\"", "") : "";
-                if (res.startsWith("OPENED_FILTER_MODAL")) {
+                if (res.startsWith("SUBMITTED_LOGIN")) {
+                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Mengirim login FLOW (" + flowUser + ")...", true);
+                } else if (res.startsWith("READY_FOR_OTP")) {
+                    isWaitingForOtp[0] = true;
+                    updateProgressNotification(activity, "📲 Masukkan OTP FLOW", "Buka dialog untuk verifikasi OTP", true);
+                    showOtpInputDialog(activity, view, noSc, isWaitingForOtp, cleanup);
+                } else if (res.startsWith("OPENED_FILTER_MODAL")) {
                     updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Membuka Filter Search Workorder Fulfillment...", true);
                 } else if (res.startsWith("APPLIED_SC_FILTER")) {
                     updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Filter SC Order no di-Apply! Menunggu tabel...", true);
@@ -881,26 +829,106 @@ public class WfmFlowAutomationManager {
                     updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📄 [1/2] Baris ditemukan! Membuka detail kartu Workorder...", true);
                 } else if (res.startsWith("DETAIL_CARD_READY")) {
                     updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✅ [1/2] Kartu Workorder tampil! Mengambil Screenshot...", true);
-                    mainHandler.postDelayed(onCardReady, 850);
+                    persistCookies(activity);
+                    mainHandler.postDelayed(onCardReady, 600);
                     return;
                 }
-                runFlowFilterAndDetailLoop(view, isFinished, noSc, flowSsCaptured, activity, onCardReady, attempt + 1);
+                runFlowPipelineFastLoop(view, isFinished, noSc, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
             });
-        }, 1200);
+        }, 350);
     }
 
     /**
-     * STAGE 3 LOOP (BACKGROUND):
-     * 1. Searches NO_SC or WONUM in the /task-order table
-     * 2. Clicks the blue "To Teknisi" button
-     * 3. Clicks "Assign" on the "Data Baru" SweetAlert2 popup
-     * 4. Fills the "Assign Order" modal:
-     *    - Pilih Teknisi *
-     *    - Nama ODP
-     *    - Paket / Package
-     *    - Latitude & Longitude
-     *    - Pastes the FLOW WFM Screenshot into "SS BIMA/WFM TA" via ClipboardEvent('paste')
-     * 5. Clicks "Simpan & Assign"
+     * Shows a clean 6-digit OTP input dialog directly on top of the active Activity.
+     * When entered, it submits the OTP directly into the background WebView waiting on /otp.
+     */
+    private static void showOtpInputDialog(Activity activity, WebView bgWebView, String noSc, boolean[] isWaitingForOtp, Runnable onCancel) {
+        if (activity == null || activity.isFinishing()) return;
+        mainHandler.post(() -> {
+            AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+            builder.setTitle("📲 Masukkan Kode OTP FLOW");
+            builder.setMessage("Kode OTP telah dikirimkan oleh FLOW ke Telegram Anda.\n\nMasukkan 6 digit kode OTP:");
+
+            LinearLayout layout = new LinearLayout(activity);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            int pad = dp(activity, 20);
+            layout.setPadding(pad, dp(activity, 10), pad, 0);
+
+            final EditText etOtp = new EditText(activity);
+            etOtp.setInputType(InputType.TYPE_CLASS_NUMBER);
+            etOtp.setHint("123456");
+            etOtp.setTextSize(24f);
+            etOtp.setTypeface(null, Typeface.BOLD);
+            etOtp.setTextColor(Color.parseColor("#F9010F"));
+            etOtp.setGravity(Gravity.CENTER);
+            etOtp.setBackgroundColor(Color.parseColor("#F3F4F6"));
+            etOtp.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
+            layout.addView(etOtp);
+
+            builder.setView(layout);
+            builder.setCancelable(false);
+            builder.setPositiveButton("✅ Verifikasi & Lanjut", null);
+            builder.setNegativeButton("Batal", (d, w) -> {
+                d.dismiss();
+                isWaitingForOtp[0] = false;
+                if (onCancel != null) onCancel.run();
+                cancelProgressNotification(activity);
+                Toast.makeText(activity, "Otomasi FLOW dibatalkan.", Toast.LENGTH_SHORT).show();
+            });
+
+            AlertDialog dialog = builder.create();
+            dialog.setOnShowListener(d -> {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                }
+                etOtp.requestFocus();
+
+                Button btnSubmit = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                btnSubmit.setOnClickListener(v -> {
+                    String otpCode = etOtp.getText().toString().trim();
+                    if (otpCode.length() < 4) {
+                        Toast.makeText(activity, "Masukkan 6 digit kode OTP yang valid!", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    dialog.dismiss();
+                    Toast.makeText(activity, "Memverifikasi OTP FLOW...", Toast.LENGTH_SHORT).show();
+                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📲 Memverifikasi OTP FLOW Telegram...", true);
+
+                    String safeOtp = escapeJs(otpCode);
+                    String submitJs = "(function(){" +
+                            "var inp = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
+                            "if(inp){" +
+                            "  inp.focus();" +
+                            "  inp.value = '" + safeOtp + "';" +
+                            "  inp.dispatchEvent(new Event('input', {bubbles:true}));" +
+                            "  inp.dispatchEvent(new Event('change', {bubbles:true}));" +
+                            "  if(window.Swal){" +
+                            "    var origSwal = window.Swal.fire;" +
+                            "    window.Swal.fire = function(){" +
+                            "      setTimeout(function(){ window.location.href = '/workorder'; }, 50);" +
+                            "      return origSwal.apply(this, arguments);" +
+                            "    };" +
+                            "  }" +
+                            "  var btn = document.getElementById('signInButton') || document.querySelector('button[type=\"submit\"]');" +
+                            "  if(btn){ btn.click(); return 'CLICKED_SIGN_IN'; }" +
+                            "  var form = document.getElementById('otpForm') || inp.closest('form');" +
+                            "  if(form){ form.dispatchEvent(new Event('submit', {bubbles:true, cancelable:true})); return 'SUBMITTED_FORM'; }" +
+                            "}" +
+                            "return 'OTP_INPUT_NOT_FOUND';" +
+                            "})();";
+                    bgWebView.evaluateJavascript(submitJs, res -> {
+                        // Resume loop so it can catch redirect to /workorder immediately
+                        isWaitingForOtp[0] = false;
+                    });
+                });
+            });
+
+            dialog.show();
+        });
+    }
+
+    /**
+     * STAGE 3 LOOP (FAST BACKGROUND POLLING EVERY 450MS):
      */
     private static void runHebitProTaskOrderLoop(
             WebView view,
@@ -918,9 +946,9 @@ public class WfmFlowAutomationManager {
             Runnable cleanup,
             int attempt
     ) {
-        if (isFinished[0] || attempt > 28) {
-            if (attempt > 28 && !isFinished[0]) {
-                updateProgressNotification(activity, "⚠️ Timeout HebitPro", "Form assign belum selesai dalam 35 detik", false);
+        if (isFinished[0] || attempt > 40) {
+            if (attempt > 40 && !isFinished[0]) {
+                updateProgressNotification(activity, "⚠️ Timeout HebitPro", "Form assign belum selesai dalam 20 detik", false);
                 cleanup.run();
             }
             return;
@@ -943,7 +971,7 @@ public class WfmFlowAutomationManager {
                             persistCookies(activity);
                             cancelProgressNotification(activity);
                             Toast.makeText(activity, "✅ Order " + noSc + " berhasil di-assign & dikirim ke Telegram Teknisi!", Toast.LENGTH_LONG).show();
-                            mainHandler.postDelayed(cleanup, 2000);
+                            mainHandler.postDelayed(cleanup, 1200);
                         } else {
                             if (statusResult != null && statusResult.contains("SEARCHED_TABLE")) {
                                 updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [2/2] Mencari order di tabel HebitPro...", true);
@@ -973,7 +1001,7 @@ public class WfmFlowAutomationManager {
                         }
                     }
             );
-        }, 1300);
+        }, 450);
     }
 
     private interface StringCallback {
@@ -1024,14 +1052,12 @@ public class WfmFlowAutomationManager {
                 "var lngVal = '" + safeLng + "';" +
                 "var b64Png = '" + safeB64 + "';" +
 
-                // 1. SweetAlert2 popup ("Data Baru: WO ini belum pernah di-assign")
                 "var swalConfirm = document.querySelector('.swal2-popup.swal2-show button.swal2-confirm, .swal2-container button.swal2-confirm');" +
                 "if(swalConfirm && swalConfirm.offsetParent !== null){" +
                 "  swalConfirm.click();" +
                 "  return 'SWAL_CONFIRMED';" +
                 "}" +
 
-                // 2. Assign Order modal
                 "var assignModal = null;" +
                 "var modals = document.querySelectorAll('.modal.show, .modal[style*=\"display: block\"]');" +
                 "for(var m=0; m<modals.length; m++){" +
@@ -1063,7 +1089,6 @@ public class WfmFlowAutomationManager {
                 "  fillInputByPlaceholderOrLabel(assignModal, '-6.', 'Latitude', latVal);" +
                 "  fillInputByPlaceholderOrLabel(assignModal, '106.', 'Longitude', lngVal);" +
 
-                // Select Technician by NIK or Name
                 "  var techSelected = false;" +
                 "  var sel = assignModal.querySelector('select');" +
                 "  if(sel){" +
@@ -1118,7 +1143,6 @@ public class WfmFlowAutomationManager {
                 "    techInput.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));" +
                 "  }" +
 
-                // Paste FLOW WFM Screenshot into "SS BIMA/WFM TA"
                 "  if(b64Png && !assignModal.dataset.adingSsPasted){" +
                 "    var ssBox = assignModal.querySelector('textarea[placeholder*=\"Paste screenshot\" i], input[placeholder*=\"Paste screenshot\" i], [placeholder*=\"Paste screenshot\" i]');" +
                 "    if(ssBox){" +
@@ -1152,7 +1176,6 @@ public class WfmFlowAutomationManager {
                 "    }" +
                 "  }" +
 
-                // Click "Simpan & Assign" button
                 "  if(!assignModal.dataset.adingSaveClicked){" +
                 "    var modalBtns = assignModal.querySelectorAll('button, input[type=\"submit\"]');" +
                 "    for(var mb=0; mb<modalBtns.length; mb++){" +
@@ -1161,7 +1184,7 @@ public class WfmFlowAutomationManager {
                 "        assignModal.dataset.adingSaveClicked = '1';" +
                 "        window.__adingHebitFormSubmitted = true;" +
                 "        window.__adingHebitSaveTime = Date.now();" +
-                "        setTimeout(function(){ modalBtns[mb].click(); }, 900);" +
+                "        setTimeout(function(){ modalBtns[mb].click(); }, 350);" +
                 "        return 'CLICKED_SIMPAN_ASSIGN';" +
                 "      }" +
                 "    }" +
@@ -1169,15 +1192,13 @@ public class WfmFlowAutomationManager {
                 "  return 'MODAL_OPEN';" +
                 "}" +
 
-                // 3. Post-save wait
                 "if(window.__adingHebitFormSubmitted){" +
-                "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 3800){" +
+                "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 2500){" +
                 "    return 'WAITING_POST_SAVE';" +
                 "  }" +
                 "  return 'DONE_SUBMITTED';" +
                 "}" +
 
-                // 4. On /task-order table: search order and click "To Teknisi"
                 "var searchTarget = noSc || wonum;" +
                 "if(searchTarget && window.__adingHebitSearched !== searchTarget){" +
                 "  if(window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable){" +
@@ -1234,10 +1255,6 @@ public class WfmFlowAutomationManager {
         void onExtracted(Bitmap croppedBitmap, JSONObject extractedData);
     }
 
-    /**
-     * Extracts unmasked customer data from Workorder detail card on FLOW
-     * and crops the screenshot to the Workorder card container.
-     */
     private static void extractFlowCardAndCropBitmap(WebView webView, FlowExtractionCallback callback) {
         String js = "(function(){" +
                 "function getValByLabel(lbl){" +
@@ -1340,7 +1357,7 @@ public class WfmFlowAutomationManager {
                 } catch (Exception e) {
                     callback.onExtracted(null, finalExtracted);
                 }
-            }, 400);
+            }, 300);
         });
     }
 
@@ -1373,40 +1390,6 @@ public class WfmFlowAutomationManager {
         return null;
     }
 
-    private static void injectFlowAutoLoginScript(WebView webView, String username, String password, boolean autoSubmit) {
-        String safeUser = escapeJs(username);
-        String safePass = escapeJs(password);
-        String js = "(function(){" +
-                "var otpInput = document.getElementById('otp');" +
-                "if(otpInput){ otpInput.focus(); return; }" +
-                "var userInput = document.getElementById('inputEmail4') || document.querySelector('input[name=\"username\"]');" +
-                "var passInput = document.getElementById('inputPassword4') || document.querySelector('input[name=\"password\"]');" +
-                "if(!userInput || !passInput || passInput.dataset.adingFilled) return;" +
-                "passInput.dataset.adingFilled = '1';" +
-                "userInput.value = '" + safeUser + "';" +
-                "userInput.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "userInput.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "passInput.value = '" + safePass + "';" +
-                "passInput.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "passInput.dispatchEvent(new Event('change', {bubbles:true}));" +
-                // Ensure Remember Me has name="remember" and is checked so Laravel issues permanent remember cookie
-                "var rem = document.getElementById('gridCheck');" +
-                "if(rem){" +
-                "  rem.setAttribute('name', 'remember');" +
-                "  rem.name = 'remember';" +
-                "  rem.value = '1';" +
-                "  rem.checked = true;" +
-                "}" +
-                (autoSubmit ? (
-                "setTimeout(function(){" +
-                "  var btn = document.querySelector('#loginForm button[type=\"submit\"], button.btn-danger[type=\"submit\"]');" +
-                "  if(btn && !btn.dataset.adingClicked){ btn.dataset.adingClicked = '1'; btn.click(); }" +
-                "}, 350);"
-                ) : "") +
-                "})();";
-        webView.evaluateJavascript(js, null);
-    }
-
     private static void injectHebitAutoLoginScript(WebView webView, String username, String password) {
         String safeUser = escapeJs(username);
         String safePass = escapeJs(password);
@@ -1435,10 +1418,6 @@ public class WfmFlowAutomationManager {
         webView.evaluateJavascript(js, null);
     }
 
-    /**
-     * Optional Control Panel Dialog in case user wants to manually update credentials
-     * or test single search & assign run.
-     */
     public static void showControlPanelDialog(Activity activity, WebView mainWebView) {
         if (activity == null || activity.isFinishing()) return;
         mainHandler.post(() -> {
@@ -1459,17 +1438,16 @@ public class WfmFlowAutomationManager {
             container.addView(tvTitle);
 
             TextView tvSub = new TextView(activity);
-            tvSub.setText("Otomasi berjalan sepenuhnya di latar belakang (background) saat Anda klik tombol [Dispatch] di ADING tanpa mengganggu tampilan layar.");
+            tvSub.setText("Otomasi berjalan sepenuhnya di latar belakang saat Anda klik tombol [Dispatch] di ADING.");
             tvSub.setTextSize(12f);
             tvSub.setTextColor(Color.parseColor("#4B5563"));
             tvSub.setPadding(0, dp(activity, 4), 0, dp(activity, 12));
             container.addView(tvSub);
 
-            // Quick Login / Session Check Buttons
             LinearLayout navRow = new LinearLayout(activity);
             navRow.setOrientation(LinearLayout.HORIZONTAL);
-            Button btnLoginFlow = createSmallButton(activity, "🔑 Cek Sesi FLOW", "#111827");
-            Button btnLoginHebit = createSmallButton(activity, "🔑 Cek Sesi HebitPro", "#002E7A");
+            Button btnLoginFlow = createSmallButton(activity, "🔑 Buka Sesi FLOW", "#111827");
+            Button btnLoginHebit = createSmallButton(activity, "🔑 Buka Sesi HebitPro", "#002E7A");
             navRow.addView(btnLoginFlow, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             navRow.addView(btnLoginHebit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             container.addView(navRow);
@@ -1578,7 +1556,7 @@ public class WfmFlowAutomationManager {
         tvTitle.setTypeface(null, Typeface.BOLD);
         topBar.addView(tvTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button btnDone = createSmallButton(activity, "✅ Selesai & Kembali ke ADING", "#10B981");
+        Button btnDone = createSmallButton(activity, "✅ Selesai & Simpan Sesi", "#10B981");
         btnDone.setOnClickListener(v -> {
             persistCookies(activity);
             dlg.dismiss();
@@ -1610,10 +1588,6 @@ public class WfmFlowAutomationManager {
                 if (url.contains("flow.telkomakses.co.id")) {
                     if (url.contains("/unauthorize")) {
                         view.loadUrl(FLOW_LOGIN_URL);
-                        return;
-                    }
-                    if (url.endsWith("flow.telkomakses.co.id/") || url.endsWith("flow.telkomakses.co.id") || url.contains("/login")) {
-                        injectFlowAutoLoginScript(view, flowUser, flowPass, false);
                     }
                 } else if (url.contains("hebitpro-kaltara.ops.web.id")) {
                     injectHebitAutoLoginScript(view, hebitUser, hebitPass);
