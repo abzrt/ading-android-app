@@ -1,6 +1,7 @@
 package id.web.ading;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -19,6 +20,8 @@ import androidx.core.content.ContextCompat;
 
 import org.json.JSONObject;
 
+import java.lang.ref.WeakReference;
+
 public class AdingNotificationBridge {
 
     private static final String PREFS_NAME = "ading_tech_prefs";
@@ -28,9 +31,14 @@ public class AdingNotificationBridge {
     private static final String DEFAULT_CHANNEL_NAME = "Task Assigned Teknisi";
 
     private final Context context;
+    private static WeakReference<Activity> sActivityRef;
+    private static WeakReference<WebView> sWebViewRef;
 
     public AdingNotificationBridge(Context context) {
         this.context = context.getApplicationContext();
+        if (context instanceof Activity) {
+            sActivityRef = new WeakReference<>((Activity) context);
+        }
         ensureNotificationChannel(DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_NAME);
     }
 
@@ -214,8 +222,33 @@ public class AdingNotificationBridge {
         NotificationManagerCompat.from(context).notify(notificationId, builder.build());
     }
 
+    /**
+     * Triggered automatically when user clicks "Dispatch" button inside
+     * "DISPATCH ORDER KE TEKNISI" modal on https://ading.web.id
+     */
+    @JavascriptInterface
+    public void onDispatchOrderTriggered(String dispatchJson) {
+        Activity act = sActivityRef != null ? sActivityRef.get() : null;
+        if (act != null && dispatchJson != null && !dispatchJson.isEmpty()) {
+            WfmFlowAutomationManager.onAdingDispatchTriggered(act, dispatchJson);
+        }
+    }
+
+    @JavascriptInterface
+    public void openWfmHebitPanel() {
+        Activity act = sActivityRef != null ? sActivityRef.get() : null;
+        WebView wv = sWebViewRef != null ? sWebViewRef.get() : null;
+        if (act != null) {
+            WfmFlowAutomationManager.showControlPanelDialog(act, wv);
+        }
+    }
+
     public static void injectWebNotificationHook(WebView view) {
         if (view == null) return;
+        sWebViewRef = new WeakReference<>(view);
+        if (view.getContext() instanceof Activity) {
+            sActivityRef = new WeakReference<>((Activity) view.getContext());
+        }
         String js = "(function(){" +
                 "if(window.__adingNotifHooked)return;window.__adingNotifHooked=true;" +
                 "if(window.AdingAndroid){" +
@@ -228,6 +261,7 @@ public class AdingNotificationBridge {
                 "}" +
                 "})();";
         view.evaluateJavascript(js, null);
+        WfmFlowAutomationManager.onPageLoaded(view, view.getUrl());
     }
 
     private String nonEmpty(String val) {
