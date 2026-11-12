@@ -29,6 +29,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -73,6 +74,9 @@ public class WfmFlowAutomationManager {
     private static final String KEY_HEBIT_USER = "hebit_username";
     private static final String KEY_HEBIT_PASS = "hebit_password";
 
+    private static final String KEY_FLOW_COOKIES = "flow_saved_cookies";
+    private static final String KEY_HEBIT_COOKIES = "hebit_saved_cookies";
+
     private static final String BG_CHANNEL_ID = "ading_bg_dispatch_pipeline";
     private static final String BG_CHANNEL_NAME = "Otomasi Background FLOW & HebitPro";
     private static final int NOTIF_PROGRESS_ID = 8801;
@@ -112,6 +116,62 @@ public class WfmFlowAutomationManager {
                 .putString(KEY_HEBIT_USER, (hebitUser != null && !hebitUser.trim().isEmpty()) ? hebitUser.trim() : DEFAULT_HEBIT_USER)
                 .putString(KEY_HEBIT_PASS, (hebitPass != null && !hebitPass.isEmpty()) ? hebitPass : DEFAULT_HEBIT_PASS)
                 .apply();
+    }
+
+    /**
+     * Persists FLOW and HebitPro session cookies into SharedPreferences so sessions survive app restarts
+     */
+    public static void persistCookies(Context context) {
+        if (context == null) return;
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            cm.flush();
+            String flowCookies = cm.getCookie("https://flow.telkomakses.co.id");
+            String hebitCookies = cm.getCookie("https://hebitpro-kaltara.ops.web.id");
+            SharedPreferences.Editor editor = getPrefs(context).edit();
+            if (flowCookies != null && !flowCookies.isEmpty()) {
+                editor.putString(KEY_FLOW_COOKIES, flowCookies);
+            }
+            if (hebitCookies != null && !hebitCookies.isEmpty()) {
+                editor.putString(KEY_HEBIT_COOKIES, hebitCookies);
+            }
+            editor.apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Restores FLOW and HebitPro cookies from SharedPreferences into CookieManager
+     */
+    public static void restoreCookies(Context context) {
+        if (context == null) return;
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            cm.setAcceptCookie(true);
+            SharedPreferences prefs = getPrefs(context);
+            String flowCookies = prefs.getString(KEY_FLOW_COOKIES, "");
+            if (!flowCookies.isEmpty()) {
+                String[] parts = flowCookies.split(";");
+                for (String p : parts) {
+                    String cookie = p.trim();
+                    if (!cookie.isEmpty()) {
+                        cm.setCookie("https://flow.telkomakses.co.id", cookie + "; path=/; secure; samesite=lax");
+                    }
+                }
+            }
+            String hebitCookies = prefs.getString(KEY_HEBIT_COOKIES, "");
+            if (!hebitCookies.isEmpty()) {
+                String[] parts = hebitCookies.split(";");
+                for (String p : parts) {
+                    String cookie = p.trim();
+                    if (!cookie.isEmpty()) {
+                        cm.setCookie("https://hebitpro-kaltara.ops.web.id", cookie + "; path=/; secure; samesite=lax");
+                    }
+                }
+            }
+            cm.flush();
+        } catch (Exception ignored) {
+        }
     }
 
     private static void ensureBgNotificationChannel(Context context) {
@@ -166,7 +226,7 @@ public class WfmFlowAutomationManager {
      */
     public static void onPageLoaded(WebView webView, String url) {
         if (webView == null || url == null) return;
-        CookieManager.getInstance().flush();
+        restoreCookies(webView.getContext());
 
         if (url.contains("ading.web.id")) {
             injectAdingDispatchInterceptor(webView);
@@ -294,14 +354,11 @@ public class WfmFlowAutomationManager {
 
     /**
      * RUNS 100% IN THE BACKGROUND:
-     * 1. Opens FLOW Telkom Akses (flow.telkomakses.co.id/workorder) in background worker WebView.
-     *    Filters NO_SC into "SC Order no:" -> clicks "Apply" -> clicks matching row ->
-     *    captures desktop screenshot of Workorder card & unmasked customer data.
-     * 2. Opens HebitPro (hebitpro-kaltara.ops.web.id/task-order) in background worker WebView.
-     *    Searches order -> clicks "To Teknisi" -> confirms Data Baru -> fills technician, ODP,
-     *    package, coordinates -> pastes FLOW WFM screenshot into "SS BIMA/WFM TA" ->
-     *    clicks "Simpan & Assign" so @hebitpro_bot notifies Telegram group!
-     * ADING UI stays completely untouched and smooth!
+     * - Restores persistent cookies so OTP is only asked ONCE.
+     * - Opens FLOW (flow.telkomakses.co.id/workorder) directly with active session.
+     * - If session expired, asks for OTP ONCE via a clean native dialog and immediately resumes without failing.
+     * - Captures desktop screenshot of Workorder card & unmasked customer data.
+     * - Assigns in HebitPro (/task-order) and sends to Telegram via @hebitpro_bot.
      */
     @SuppressLint("SetJavaScriptEnabled")
     public static void runFullDispatchToFlowAndHebitPipeline(
@@ -320,6 +377,8 @@ public class WfmFlowAutomationManager {
     ) {
         if (activity == null || activity.isFinishing()) return;
         mainHandler.post(() -> {
+            restoreCookies(activity);
+
             SharedPreferences prefs = getPrefs(activity);
             String flowUser = prefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
             String flowPass = prefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
@@ -405,6 +464,7 @@ public class WfmFlowAutomationManager {
             final String[] capturedBase64Png = {""};
             final String[] resolvedWonum = {initialWonum != null ? initialWonum : ""};
             final boolean[] isFinished = {false};
+            final boolean[] otpDialogShown = {false};
 
             final ViewGroup finalRoot = root;
             Runnable cleanup = () -> {
@@ -412,6 +472,7 @@ public class WfmFlowAutomationManager {
                 isFinished[0] = true;
                 mainHandler.post(() -> {
                     try {
+                        persistCookies(activity);
                         bgWebView.stopLoading();
                         bgWebView.loadUrl("about:blank");
                         bgContainer.removeAllViews();
@@ -500,20 +561,22 @@ public class WfmFlowAutomationManager {
                 @Override
                 public void onPageFinished(WebView view, String url) {
                     super.onPageFinished(view, url);
-                    CookieManager.getInstance().flush();
+                    persistCookies(activity);
                     if (url == null || isFinished[0]) return;
 
                     // ================= STAGE 1: FLOW TELKOM AKSES =================
                     if (url.contains("flow.telkomakses.co.id")) {
                         if (url.contains("/unauthorize")) {
-                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Mengalihkan ke Login FLOW...", true);
+                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Sesi FLOW kedaluwarsa, mengalihkan...", true);
                             view.loadUrl(FLOW_LOGIN_URL);
                             return;
                         }
                         if (url.contains("/otp")) {
-                            updateProgressNotification(activity, "📲 Masukkan OTP FLOW", "Buka dialog untuk verifikasi OTP", false);
-                            openSessionHelperDialog(activity, FLOW_LOGIN_URL, "📲 Masukkan OTP FLOW Telkom Akses");
-                            cleanup.run();
+                            if (!otpDialogShown[0]) {
+                                otpDialogShown[0] = true;
+                                updateProgressNotification(activity, "📲 Masukkan OTP FLOW", "Buka dialog untuk verifikasi OTP", true);
+                                showOtpInputDialog(activity, view, noSc, cleanup);
+                            }
                             return;
                         }
                         if (url.endsWith("flow.telkomakses.co.id/") || url.endsWith("flow.telkomakses.co.id") || url.contains("/login")) {
@@ -522,11 +585,13 @@ public class WfmFlowAutomationManager {
                             return;
                         }
                         if (url.contains("/home") || url.contains("/dashboard")) {
+                            persistCookies(activity);
                             updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✅ [1/2] Login FLOW sukses! Membuka /workorder...", true);
                             view.loadUrl(FLOW_WORKORDER_URL);
                             return;
                         }
                         if (url.contains("/workorder")) {
+                            persistCookies(activity);
                             updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Filter SC Order no: " + noSc + " di FLOW...", true);
                             injectDesktopViewport(view);
                             runFlowFilterAndDetailLoop(
@@ -578,6 +643,88 @@ public class WfmFlowAutomationManager {
             });
 
             bgWebView.loadUrl(FLOW_WORKORDER_URL);
+        });
+    }
+
+    /**
+     * Shows a clean 6-digit OTP input dialog directly on top of the active Activity.
+     * When entered, it submits the OTP directly into the background WebView waiting on /otp.
+     * Once verified, the session cookies are permanently saved and the pipeline continues automatically!
+     */
+    private static void showOtpInputDialog(Activity activity, WebView bgWebView, String noSc, Runnable onCancel) {
+        if (activity == null || activity.isFinishing()) return;
+        mainHandler.post(() -> {
+            AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+            builder.setTitle("📲 Masukkan Kode OTP FLOW");
+            builder.setMessage("Kode OTP telah dikirimkan oleh FLOW ke Telegram Anda.\n\nMasukkan 6 digit kode OTP sekali ini saja untuk mengaktifkan sesi permanen:");
+
+            LinearLayout layout = new LinearLayout(activity);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            int pad = dp(activity, 20);
+            layout.setPadding(pad, dp(activity, 10), pad, 0);
+
+            final EditText etOtp = new EditText(activity);
+            etOtp.setInputType(InputType.TYPE_CLASS_NUMBER);
+            etOtp.setHint("123456");
+            etOtp.setTextSize(22f);
+            etOtp.setTypeface(null, Typeface.BOLD);
+            etOtp.setTextColor(Color.parseColor("#F9010F"));
+            etOtp.setGravity(Gravity.CENTER);
+            etOtp.setBackgroundColor(Color.parseColor("#F3F4F6"));
+            etOtp.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
+            layout.addView(etOtp);
+
+            builder.setView(layout);
+            builder.setCancelable(false);
+            builder.setPositiveButton("✅ Verifikasi & Simpan Sesi", null);
+            builder.setNegativeButton("Batal", (d, w) -> {
+                d.dismiss();
+                if (onCancel != null) onCancel.run();
+                cancelProgressNotification(activity);
+                Toast.makeText(activity, "Verifikasi OTP dibatalkan.", Toast.LENGTH_SHORT).show();
+            });
+
+            AlertDialog dialog = builder.create();
+            dialog.setOnShowListener(d -> {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                }
+                etOtp.requestFocus();
+
+                Button btnSubmit = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                btnSubmit.setOnClickListener(v -> {
+                    String otpCode = etOtp.getText().toString().trim();
+                    if (otpCode.length() < 4) {
+                        Toast.makeText(activity, "Masukkan 6 digit kode OTP yang valid!", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    dialog.dismiss();
+                    Toast.makeText(activity, "Memverifikasi OTP FLOW...", Toast.LENGTH_SHORT).show();
+                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📲 Memverifikasi OTP FLOW Telegram...", true);
+
+                    // Inject OTP into the background WebView waiting on /otp
+                    String safeOtp = escapeJs(otpCode);
+                    String submitJs = "(function(){" +
+                            "var inp = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
+                            "if(inp){" +
+                            "  inp.focus();" +
+                            "  inp.value = '" + safeOtp + "';" +
+                            "  inp.dispatchEvent(new Event('input', {bubbles:true}));" +
+                            "  inp.dispatchEvent(new Event('change', {bubbles:true}));" +
+                            "  var form = document.getElementById('otpForm') || inp.closest('form');" +
+                            "  var btn = document.getElementById('signInButton') || (form ? form.querySelector('button[type=\"submit\"]') : null);" +
+                            "  if(btn){ btn.click(); return 'CLICKED_SIGN_IN'; }" +
+                            "  if(form){ form.dispatchEvent(new Event('submit', {bubbles:true, cancelable:true})); return 'SUBMITTED_FORM'; }" +
+                            "}" +
+                            "return 'OTP_INPUT_NOT_FOUND';" +
+                            "})();";
+                    bgWebView.evaluateJavascript(submitJs, res -> {
+                        // After valid OTP, FLOW will redirect to /home, where onPageFinished will persist cookies and load /workorder!
+                    });
+                });
+            });
+
+            dialog.show();
         });
     }
 
@@ -793,6 +940,7 @@ public class WfmFlowAutomationManager {
                     base64Png,
                     statusResult -> {
                         if (statusResult != null && statusResult.contains("DONE_SUBMITTED")) {
+                            persistCookies(activity);
                             cancelProgressNotification(activity);
                             Toast.makeText(activity, "✅ Order " + noSc + " berhasil di-assign & dikirim ke Telegram Teknisi!", Toast.LENGTH_LONG).show();
                             mainHandler.postDelayed(cleanup, 2000);
@@ -1241,8 +1389,14 @@ public class WfmFlowAutomationManager {
                 "passInput.value = '" + safePass + "';" +
                 "passInput.dispatchEvent(new Event('input', {bubbles:true}));" +
                 "passInput.dispatchEvent(new Event('change', {bubbles:true}));" +
+                // Ensure Remember Me has name="remember" and is checked so Laravel issues permanent remember cookie
                 "var rem = document.getElementById('gridCheck');" +
-                "if(rem && !rem.checked){ rem.checked = true; }" +
+                "if(rem){" +
+                "  rem.setAttribute('name', 'remember');" +
+                "  rem.name = 'remember';" +
+                "  rem.value = '1';" +
+                "  rem.checked = true;" +
+                "}" +
                 (autoSubmit ? (
                 "setTimeout(function(){" +
                 "  var btn = document.querySelector('#loginForm button[type=\"submit\"], button.btn-danger[type=\"submit\"]');" +
@@ -1396,6 +1550,8 @@ public class WfmFlowAutomationManager {
     @SuppressLint("SetJavaScriptEnabled")
     public static void openSessionHelperDialog(Activity activity, String targetUrl, String title) {
         if (activity == null || activity.isFinishing()) return;
+        restoreCookies(activity);
+
         SharedPreferences prefs = getPrefs(activity);
         String flowUser = prefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
         String flowPass = prefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
@@ -1424,7 +1580,7 @@ public class WfmFlowAutomationManager {
 
         Button btnDone = createSmallButton(activity, "✅ Selesai & Kembali ke ADING", "#10B981");
         btnDone.setOnClickListener(v -> {
-            CookieManager.getInstance().flush();
+            persistCookies(activity);
             dlg.dismiss();
         });
         topBar.addView(btnDone);
@@ -1449,14 +1605,16 @@ public class WfmFlowAutomationManager {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                CookieManager.getInstance().flush();
+                persistCookies(activity);
                 if (url == null) return;
                 if (url.contains("flow.telkomakses.co.id")) {
                     if (url.contains("/unauthorize")) {
                         view.loadUrl(FLOW_LOGIN_URL);
                         return;
                     }
-                    injectFlowAutoLoginScript(view, flowUser, flowPass, true);
+                    if (url.endsWith("flow.telkomakses.co.id/") || url.endsWith("flow.telkomakses.co.id") || url.contains("/login")) {
+                        injectFlowAutoLoginScript(view, flowUser, flowPass, false);
+                    }
                 } else if (url.contains("hebitpro-kaltara.ops.web.id")) {
                     injectHebitAutoLoginScript(view, hebitUser, hebitPass);
                 }
