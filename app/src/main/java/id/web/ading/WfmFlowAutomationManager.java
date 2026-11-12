@@ -1,14 +1,18 @@
 package id.web.ading;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -22,6 +26,7 @@ import android.provider.MediaStore;
 import android.text.InputType;
 import android.util.Base64;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.CookieManager;
@@ -31,10 +36,16 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -61,6 +72,10 @@ public class WfmFlowAutomationManager {
     private static final String KEY_FLOW_PASS = "flow_password";
     private static final String KEY_HEBIT_USER = "hebit_username";
     private static final String KEY_HEBIT_PASS = "hebit_password";
+
+    private static final String BG_CHANNEL_ID = "ading_bg_dispatch_pipeline";
+    private static final String BG_CHANNEL_NAME = "Otomasi Background FLOW & HebitPro";
+    private static final int NOTIF_PROGRESS_ID = 8801;
 
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -99,42 +114,70 @@ public class WfmFlowAutomationManager {
                 .apply();
     }
 
+    private static void ensureBgNotificationChannel(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null && nm.getNotificationChannel(BG_CHANNEL_ID) == null) {
+                NotificationChannel ch = new NotificationChannel(
+                        BG_CHANNEL_ID,
+                        BG_CHANNEL_NAME,
+                        NotificationManager.IMPORTANCE_LOW
+                );
+                ch.setDescription("Notifikasi proses latar belakang pencarian WFM FLOW dan assign HebitPro");
+                ch.setShowBadge(false);
+                nm.createNotificationChannel(ch);
+            }
+        }
+    }
+
+    private static void updateProgressNotification(Context context, String title, String message, boolean ongoing) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
+            }
+            ensureBgNotificationChannel(context);
+            NotificationCompat.Builder b = new NotificationCompat.Builder(context, BG_CHANNEL_ID)
+                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setContentTitle(title)
+                    .setContentText(message)
+                    .setOngoing(ongoing)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setOnlyAlertOnce(true);
+            if (ongoing) {
+                b.setProgress(0, 0, true);
+            }
+            NotificationManagerCompat.from(context).notify(NOTIF_PROGRESS_ID, b.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void cancelProgressNotification(Context context) {
+        try {
+            NotificationManagerCompat.from(context).cancel(NOTIF_PROGRESS_ID);
+        } catch (Exception ignored) {
+        }
+    }
+
     /**
-     * Called on every page load in MainActivity's WebView.
-     * - On ading.web.id: injects the Dispatch Order interceptor (Foto Pertama)
-     * - On flow.telkomakses.co.id: auto-logins with 16830482
-     * - On hebitpro-kaltara.ops.web.id: auto-fills irfan_nnk
+     * Called on page load in MainActivity's WebView.
+     * Hooks dispatch events on ading.web.id with ZERO visual modifications to keep ADING 100% authentic.
      */
     public static void onPageLoaded(WebView webView, String url) {
         if (webView == null || url == null) return;
-        Context context = webView.getContext();
-        SharedPreferences prefs = getPrefs(context);
         CookieManager.getInstance().flush();
 
         if (url.contains("ading.web.id")) {
             injectAdingDispatchInterceptor(webView);
-        } else if (url.contains("flow.telkomakses.co.id")) {
-            if (url.contains("/unauthorize")) {
-                webView.loadUrl(FLOW_LOGIN_URL);
-                return;
-            }
-            String user = prefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
-            String pass = prefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
-            injectFlowAutoLoginScript(webView, user, pass, true);
-        } else if (url.contains("hebitpro-kaltara.ops.web.id")) {
-            String user = prefs.getString(KEY_HEBIT_USER, DEFAULT_HEBIT_USER);
-            String pass = prefs.getString(KEY_HEBIT_PASS, DEFAULT_HEBIT_PASS);
-            injectHebitAutoLoginScript(webView, user, pass);
         }
-
-        injectFloatingControlWidget(webView);
     }
 
     /**
-     * STAGE 1 (FOTO PERTAMA):
+     * STAGE 1:
      * Intercepts clicking "Dispatch" inside the "DISPATCH ORDER KE TEKNISI" modal on https://ading.web.id
      * (/provisioning/undispatch and /provisioning/search-order).
-     * Captures NO_SC, STO, PAKET, ODP, KORDINAT, Service Area, and Tim Teknisi (leader_nik & leader_name).
+     * Captures NO_SC, WONUM, STO, PAKET, ODP, KORDINAT, Service Area, and Tim Teknisi (leader_nik & leader_name).
      */
     private static void injectAdingDispatchInterceptor(WebView webView) {
         String js = "(function(){" +
@@ -142,12 +185,10 @@ public class WfmFlowAutomationManager {
                 "window.__adingDispatchHooked = true;" +
                 "window.__adingOrdersBySc = window.__adingOrdersBySc || {};" +
                 "window.__adingTeamsCache = window.__adingTeamsCache || [];" +
-                // Pre-fetch team-options so we always have leader_nik and leader_name for every team
                 "fetch(window.location.origin + '/api/provisioning/team-options?_t=' + Date.now())" +
                 "  .then(function(r){ return r.ok ? r.json() : []; })" +
                 "  .then(function(arr){ if(Array.isArray(arr) && arr.length > 0) window.__adingTeamsCache = arr; })" +
                 "  .catch(function(){});" +
-                // Wrap window.fetch to cache order rows & intercept POST /api/provisioning/dispatch-bulk or redispatch
                 "var origFetch = window.fetch;" +
                 "window.fetch = function(input, init){" +
                 "  var url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');" +
@@ -212,7 +253,7 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * Called when the user clicks "Dispatch" in Foto Pertama on https://ading.web.id
+     * Called when user clicks "Dispatch" in modal on https://ading.web.id
      */
     public static void onAdingDispatchTriggered(Activity activity, String dispatchJson) {
         if (activity == null || activity.isFinishing()) return;
@@ -252,14 +293,15 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * Runs the complete automated pipeline requested by user:
-     * 1. Opens https://flow.telkomakses.co.id/workorder -> Filter "Search Workorder Fulfillment" ->
-     *    inputs NO_SC into "SC Order no:" -> clicks "Apply" (Foto Kedua) -> clicks Workorder row ->
-     *    captures cropped Screenshot of "Workorder" detail card (Foto Ketiga) & extracts unmasked customer info.
-     * 2. Opens https://hebitpro-kaltara.ops.web.id/task-order -> searches NO_SC/WO -> clicks "✈️ To Teknisi" ->
-     *    clicks "Assign" on "Data Baru" popup -> fills Pilih Teknisi, Nama ODP, Paket, Latitude, Longitude,
-     *    pastes the FLOW WFM Screenshot into "SS BIMA/WFM TA" -> clicks "💾 Simpan & Assign" so @hebitpro_bot
-     *    sends the SS WFM + TASK ASSIGNED BARU notification to the technician's Telegram group!
+     * RUNS 100% IN THE BACKGROUND:
+     * 1. Opens FLOW Telkom Akses (flow.telkomakses.co.id/workorder) in background worker WebView.
+     *    Filters NO_SC into "SC Order no:" -> clicks "Apply" -> clicks matching row ->
+     *    captures desktop screenshot of Workorder card & unmasked customer data.
+     * 2. Opens HebitPro (hebitpro-kaltara.ops.web.id/task-order) in background worker WebView.
+     *    Searches order -> clicks "To Teknisi" -> confirms Data Baru -> fills technician, ODP,
+     *    package, coordinates -> pastes FLOW WFM screenshot into "SS BIMA/WFM TA" ->
+     *    clicks "Simpan & Assign" so @hebitpro_bot notifies Telegram group!
+     * ADING UI stays completely untouched and smooth!
      */
     @SuppressLint("SetJavaScriptEnabled")
     public static void runFullDispatchToFlowAndHebitPipeline(
@@ -288,73 +330,118 @@ public class WfmFlowAutomationManager {
                     ? (leaderName + (!leaderNik.isEmpty() ? " (" + leaderNik + ")" : ""))
                     : (!namaTim.isEmpty() ? namaTim : "Teknisi");
 
-            Dialog pipelineDialog = new Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen);
-            pipelineDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+            // Non-intrusive feedback: Toast + Ongoing Progress Notification in Status Bar
+            Toast.makeText(activity, "⚡ Memproses di background: FLOW WFM & HebitPro (" + noSc + ")", Toast.LENGTH_SHORT).show();
+            updateProgressNotification(
+                    activity,
+                    "⚡ Dispatch Order: " + noSc,
+                    "[1/2] Mencari di FLOW Telkom Akses → " + techDisplay,
+                    true
+            );
 
-            LinearLayout root = new LinearLayout(activity);
-            root.setOrientation(LinearLayout.VERTICAL);
-            root.setBackgroundColor(Color.WHITE);
+            // Locate rootLayout to host headless background WebView behind main view
+            ViewGroup root = activity.findViewById(R.id.rootLayout);
+            if (root == null) {
+                root = (ViewGroup) activity.findViewById(android.R.id.content);
+            }
+            if (root == null) return;
 
-            // Top Status & Manual Control Bar
-            LinearLayout topBar = new LinearLayout(activity);
-            topBar.setOrientation(LinearLayout.HORIZONTAL);
-            topBar.setGravity(Gravity.CENTER_VERTICAL);
-            topBar.setBackgroundColor(Color.parseColor("#111827"));
-            int pad = dp(activity, 10);
-            topBar.setPadding(pad, pad, pad, pad);
+            // Remove any old background worker view if still present
+            View oldBg = root.findViewWithTag("TAG_WFM_BG_CONTAINER");
+            if (oldBg != null) {
+                root.removeView(oldBg);
+            }
 
-            TextView tvStatus = new TextView(activity);
-            tvStatus.setText("🔍 [1/2] FLOW: Mencari SC " + noSc + " → " + techDisplay);
-            tvStatus.setTextColor(Color.WHITE);
-            tvStatus.setTextSize(11.5f);
-            tvStatus.setTypeface(null, Typeface.BOLD);
-            topBar.addView(tvStatus, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            FrameLayout bgContainer = new FrameLayout(activity);
+            bgContainer.setTag("TAG_WFM_BG_CONTAINER");
+            int bgWidth = 1366;
+            int bgHeight = 900;
+            RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(bgWidth, bgHeight);
+            bgContainer.setLayoutParams(lp);
 
-            Button btnManualSs = createSmallButton(activity, "📸 Ambil SS & Lanjut", "#F9010F");
-            Button btnClose = createSmallButton(activity, "✖", "#374151");
-            topBar.addView(btnManualSs);
-            topBar.addView(btnClose);
-            root.addView(topBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            // Positioned behind MainActivity's SwipeRefreshLayout at index 0
+            bgContainer.setFocusable(false);
+            bgContainer.setFocusableInTouchMode(false);
+            bgContainer.setClickable(false);
 
-            WebView autoWebView = new WebView(activity);
-            WebSettings settings = autoWebView.getSettings();
+            WebView bgWebView = new WebView(activity);
+            bgWebView.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            bgWebView.setFocusable(false);
+            bgWebView.setFocusableInTouchMode(false);
+            bgWebView.setClickable(false);
+
+            WebSettings settings = bgWebView.getSettings();
             settings.setJavaScriptEnabled(true);
             settings.setDomStorageEnabled(true);
             settings.setDatabaseEnabled(true);
             settings.setUseWideViewPort(true);
             settings.setLoadWithOverviewMode(true);
-            settings.setSupportZoom(true);
-            settings.setBuiltInZoomControls(true);
+            settings.setSupportZoom(false);
             settings.setDisplayZoomControls(false);
             settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
 
             CookieManager cm = CookieManager.getInstance();
             cm.setAcceptCookie(true);
-            cm.setAcceptThirdPartyCookies(autoWebView, true);
+            cm.setAcceptThirdPartyCookies(bgWebView, true);
 
-            root.addView(autoWebView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            pipelineDialog.setContentView(root);
+            bgContainer.addView(bgWebView);
+            root.addView(bgContainer, 0); // Placed at index 0 behind everything
 
-            // Pipeline state
-            final int[] currentStage = {1}; // 1 = FLOW WFM, 2 = HEBITPRO /task-order
+            // Explicit measure and layout so width & height are immediate
+            bgContainer.measure(
+                    View.MeasureSpec.makeMeasureSpec(bgWidth, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(bgHeight, View.MeasureSpec.EXACTLY)
+            );
+            bgContainer.layout(0, 0, bgWidth, bgHeight);
+            bgWebView.measure(
+                    View.MeasureSpec.makeMeasureSpec(bgWidth, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(bgHeight, View.MeasureSpec.EXACTLY)
+            );
+            bgWebView.layout(0, 0, bgWidth, bgHeight);
+
+            // Background pipeline state
+            final int[] currentStage = {1}; // 1 = FLOW, 2 = HEBITPRO
             final boolean[] flowSsCaptured = {false};
             final String[] capturedBase64Png = {""};
             final String[] resolvedWonum = {initialWonum != null ? initialWonum : ""};
+            final boolean[] isFinished = {false};
 
-            // Transition from Stage 1 (FLOW Screenshot) to Stage 2 (HebitPro Assign & Send)
+            final ViewGroup finalRoot = root;
+            Runnable cleanup = () -> {
+                if (isFinished[0]) return;
+                isFinished[0] = true;
+                mainHandler.post(() -> {
+                    try {
+                        bgWebView.stopLoading();
+                        bgWebView.loadUrl("about:blank");
+                        bgContainer.removeAllViews();
+                        bgWebView.destroy();
+                        finalRoot.removeView(bgContainer);
+                    } catch (Exception ignored) {
+                    }
+                });
+            };
+
+            // Transition from Stage 1 (FLOW WFM Screenshot) to Stage 2 (HebitPro /task-order)
             Runnable captureFlowAndProceedToHebit = () -> {
                 if (flowSsCaptured[0] && currentStage[0] == 2) return;
                 flowSsCaptured[0] = true;
-                tvStatus.setText("📸 Mengambil SS Workorder dari FLOW...");
 
-                extractFlowCardAndCropBitmap(autoWebView, (croppedBitmap, extractedJson) -> {
+                updateProgressNotification(
+                        activity,
+                        "⚡ Dispatch Order: " + noSc,
+                        "📸 Mengambil SS Workorder dari FLOW...",
+                        true
+                );
+
+                extractFlowCardAndCropBitmap(bgWebView, (croppedBitmap, extractedJson) -> {
                     if (croppedBitmap != null) {
                         ByteArrayOutputStream bos = new ByteArrayOutputStream();
                         croppedBitmap.compress(Bitmap.CompressFormat.PNG, 92, bos);
                         capturedBase64Png[0] = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
 
-                        // Save to Gallery & Android Clipboard so it's also ready for manual paste if ever needed
-                        Uri savedUri = saveBitmapToGalleryAndClipboard(activity, croppedBitmap, noSc);
+                        // Save to Gallery & Android Clipboard
+                        saveBitmapToGalleryAndClipboard(activity, croppedBitmap, noSc);
                     }
 
                     String extCustName = "";
@@ -374,7 +461,7 @@ public class WfmFlowAutomationManager {
                         extAddress = extractedJson.optString("service_address", "").trim();
                     }
 
-                    // Show local Android notification for confirmation
+                    // Show local Android task notification
                     String aoWoLabel = noSc + (!resolvedWonum[0].isEmpty() ? " | " + resolvedWonum[0] : "");
                     new AdingNotificationBridge(activity).notifyTaskAssigned(
                             aoWoLabel,
@@ -394,35 +481,17 @@ public class WfmFlowAutomationManager {
 
                     // Move to Stage 2: HebitPro /task-order
                     currentStage[0] = 2;
-                    btnManualSs.setText("✈️ Paste SS di HebitPro");
-                    tvStatus.setText("🚀 [2/2] Membuka HebitPro (/task-order) untuk Assign ke " + techDisplay + "...");
-                    autoWebView.loadUrl(HEBITPRO_TASK_ORDER_URL);
+                    updateProgressNotification(
+                            activity,
+                            "⚡ Dispatch Order: " + noSc,
+                            "[2/2] Membuka HebitPro (/task-order) untuk Assign ke " + techDisplay + "...",
+                            true
+                    );
+                    bgWebView.loadUrl(HEBITPRO_TASK_ORDER_URL);
                 });
             };
 
-            btnManualSs.setOnClickListener(v -> {
-                if (currentStage[0] == 1) {
-                    captureFlowAndProceedToHebit.run();
-                } else {
-                    // Re-trigger HebitPro form fill + screenshot paste manually
-                    injectHebitProTaskOrderAutomation(
-                            autoWebView,
-                            noSc,
-                            resolvedWonum[0],
-                            leaderNik,
-                            leaderName,
-                            namaTim,
-                            odp,
-                            paket,
-                            koordinat,
-                            capturedBase64Png[0],
-                            tvStatus
-                    );
-                }
-            });
-            btnClose.setOnClickListener(v -> pipelineDialog.dismiss());
-
-            autoWebView.setWebViewClient(new WebViewClient() {
+            bgWebView.setWebViewClient(new WebViewClient() {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     return false;
@@ -432,39 +501,40 @@ public class WfmFlowAutomationManager {
                 public void onPageFinished(WebView view, String url) {
                     super.onPageFinished(view, url);
                     CookieManager.getInstance().flush();
-                    if (url == null || !pipelineDialog.isShowing()) return;
+                    if (url == null || isFinished[0]) return;
 
                     // ================= STAGE 1: FLOW TELKOM AKSES =================
                     if (url.contains("flow.telkomakses.co.id")) {
                         if (url.contains("/unauthorize")) {
-                            tvStatus.setText("🔐 [1/2] Mengalihkan ke halaman Login FLOW...");
+                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Mengalihkan ke Login FLOW...", true);
                             view.loadUrl(FLOW_LOGIN_URL);
                             return;
                         }
                         if (url.contains("/otp")) {
-                            tvStatus.setText("📲 [1/2] Masukkan kode OTP FLOW (hanya 1x, sesi akan tersimpan)");
-                            injectFlowAutoLoginScript(view, flowUser, flowPass, false);
+                            updateProgressNotification(activity, "📲 Masukkan OTP FLOW", "Buka dialog untuk verifikasi OTP", false);
+                            openSessionHelperDialog(activity, FLOW_LOGIN_URL, "📲 Masukkan OTP FLOW Telkom Akses");
+                            cleanup.run();
                             return;
                         }
                         if (url.endsWith("flow.telkomakses.co.id/") || url.endsWith("flow.telkomakses.co.id") || url.contains("/login")) {
-                            tvStatus.setText("🔐 [1/2] Login otomatis ke FLOW (" + flowUser + ")...");
+                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Login otomatis ke FLOW (" + flowUser + ")...", true);
                             injectFlowAutoLoginScript(view, flowUser, flowPass, true);
                             return;
                         }
                         if (url.contains("/home") || url.contains("/dashboard")) {
-                            tvStatus.setText("✅ [1/2] Login FLOW berhasil! Membuka /workorder...");
+                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✅ [1/2] Login FLOW sukses! Membuka /workorder...", true);
                             view.loadUrl(FLOW_WORKORDER_URL);
                             return;
                         }
                         if (url.contains("/workorder")) {
-                            tvStatus.setText("🔍 [1/2] Filter SC Order no: " + noSc + " di FLOW...");
+                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Filter SC Order no: " + noSc + " di FLOW...", true);
                             injectDesktopViewport(view);
                             runFlowFilterAndDetailLoop(
                                     view,
-                                    pipelineDialog,
+                                    isFinished,
                                     noSc,
                                     flowSsCaptured,
-                                    tvStatus,
+                                    activity,
                                     captureFlowAndProceedToHebit,
                                     0
                             );
@@ -475,21 +545,22 @@ public class WfmFlowAutomationManager {
                     // ================= STAGE 2: HEBITPRO KALTARA =================
                     if (url.contains("hebitpro-kaltara.ops.web.id")) {
                         if (url.contains("/login")) {
-                            tvStatus.setText("🔐 [2/2] Centang reCAPTCHA & klik Masuk di HebitPro (otomatis lanjut)");
+                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [2/2] Login otomatis ke HebitPro (" + hebitUser + ")...", true);
                             injectHebitAutoLoginScript(view, hebitUser, hebitPass);
                             return;
                         }
                         if (!url.contains("/task-order")) {
-                            tvStatus.setText("🚀 [2/2] Mengalihkan ke halaman /task-order HebitPro...");
+                            updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🚀 [2/2] Membuka /task-order HebitPro...", true);
                             view.loadUrl(HEBITPRO_TASK_ORDER_URL);
                             return;
                         }
                         // On https://hebitpro-kaltara.ops.web.id/task-order
                         injectDesktopViewport(view);
-                        tvStatus.setText("✈️ [2/2] Mencari " + noSc + " & klik [To Teknisi] di HebitPro...");
+                        updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✈️ [2/2] Mencari " + noSc + " & klik [To Teknisi]...", true);
                         runHebitProTaskOrderLoop(
                                 view,
-                                pipelineDialog,
+                                isFinished,
+                                activity,
                                 noSc,
                                 resolvedWonum[0],
                                 leaderNik,
@@ -499,50 +570,49 @@ public class WfmFlowAutomationManager {
                                 paket,
                                 koordinat,
                                 capturedBase64Png[0],
-                                tvStatus,
+                                cleanup,
                                 0
                         );
                     }
                 }
             });
 
-            pipelineDialog.show();
-            autoWebView.loadUrl(FLOW_WORKORDER_URL);
+            bgWebView.loadUrl(FLOW_WORKORDER_URL);
         });
     }
 
     /**
-     * STAGE 2 LOOP (FOTO KEDUA & FOTO KETIGA):
+     * STAGE 2 LOOP (BACKGROUND):
      * 1. Opens "Search Workorder Fulfillment" filter modal on https://flow.telkomakses.co.id/workorder
-     * 2. Enters noSc into "SC Order no:" input and clicks red "Apply" button (Foto Kedua)
+     * 2. Enters noSc into "SC Order no:" input and clicks red "Apply" button
      * 3. Clicks the matching row in the filtered table to open the Workorder detail view
-     * 4. Waits for the "Workorder" detail card (Foto Ketiga) to populate, then triggers screenshot crop
+     * 4. Waits for the "Workorder" detail card to populate, then triggers screenshot crop
      */
     private static void runFlowFilterAndDetailLoop(
             WebView view,
-            Dialog dialog,
+            boolean[] isFinished,
             String noSc,
             boolean[] flowSsCaptured,
-            TextView tvStatus,
+            Activity activity,
             Runnable onCardReady,
             int attempt
     ) {
-        if (!dialog.isShowing() || flowSsCaptured[0] || attempt > 22) {
-            if (attempt > 22 && !flowSsCaptured[0] && dialog.isShowing()) {
-                tvStatus.setText("ℹ️ Klik detail WO lalu tekan [📸 Ambil SS & Lanjut]");
+        if (isFinished[0] || flowSsCaptured[0] || attempt > 24) {
+            if (attempt > 24 && !flowSsCaptured[0] && !isFinished[0]) {
+                updateProgressNotification(activity, "⚠️ Timeout FLOW", "Detail SC " + noSc + " tidak muncul setelah 25 detik", false);
             }
             return;
         }
 
         mainHandler.postDelayed(() -> {
-            if (!dialog.isShowing() || flowSsCaptured[0]) return;
+            if (isFinished[0] || flowSsCaptured[0]) return;
             String safeSc = escapeJs(noSc);
 
             String js = "(function(){" +
                     "var targetSc = '" + safeSc + "';" +
                     "var targetLower = targetSc.toLowerCase();" +
 
-                    // 1. Check if Foto Ketiga (Workorder detail card) is ALREADY visible & populated with our SC Order!
+                    // 1. Check if Workorder detail card is ALREADY visible & populated with our SC Order
                     "function getDetailVal(lbl){" +
                     "  var nodes = document.querySelectorAll('label, div, span, td');" +
                     "  for(var i=0; i<nodes.length; i++){" +
@@ -572,7 +642,7 @@ public class WfmFlowAutomationManager {
                     "  return 'DETAIL_CARD_READY:' + woDetailVal;" +
                     "}" +
 
-                    // 2. If we already clicked Apply in Search Workorder Fulfillment modal, look for the table row & click it!
+                    // 2. If filter was applied, look for table row & click it
                     "if(window.__adingFlowFilterApplied === targetSc){" +
                     "  var rows = document.querySelectorAll('table tbody tr');" +
                     "  for(var r=0; r<rows.length; r++){" +
@@ -596,7 +666,7 @@ public class WfmFlowAutomationManager {
                     "  }" +
                     "}" +
 
-                    // 3. Otherwise, open "Search Workorder Fulfillment" filter modal (Foto Kedua), fill "SC Order no:", and click "Apply"!
+                    // 3. Otherwise, open "Search Workorder Fulfillment" filter modal, fill "SC Order no:", and click "Apply"
                     "if(window.__adingFlowFilterApplied !== targetSc){" +
                     "  var scInput = null;" +
                     "  var modalEl = null;" +
@@ -614,7 +684,6 @@ public class WfmFlowAutomationManager {
                     "    scInput = document.querySelector('input[placeholder*=\"SC Order\" i]:not([readonly]), input[name*=\"sc_order\" i]:not([readonly]), input[id*=\"sc_order\" i]:not([readonly]), input[name*=\"scorder\" i]:not([readonly]), input[id*=\"scorder\" i]:not([readonly])');" +
                     "    if(scInput) modalEl = scInput.closest('.modal') || document;" +
                     "  }" +
-                    // If modal isn't open or scInput isn't visible yet, click the Filter button on the page
                     "  if(!scInput || (modalEl && modalEl.classList && modalEl.classList.contains('modal') && !modalEl.classList.contains('show'))){" +
                     "    var filterBtns = document.querySelectorAll('[data-bs-toggle=\"modal\"], [data-toggle=\"modal\"], button, a');" +
                     "    for(var b=0; b<filterBtns.length; b++){" +
@@ -630,7 +699,6 @@ public class WfmFlowAutomationManager {
                     "  }" +
                     "  if(scInput){" +
                     "    var scope = modalEl || document;" +
-                    // Click Clear All first once so no other filter interferes
                     "    var btns = scope.querySelectorAll('button, a, input[type=\"button\"], input[type=\"reset\"]');" +
                     "    for(var m=0; m<btns.length; m++){" +
                     "      if((btns[m].innerText || btns[m].value || '').trim().toLowerCase() === 'clear all' && !btns[m].dataset.adingCleared){" +
@@ -643,7 +711,6 @@ public class WfmFlowAutomationManager {
                     "    scInput.dispatchEvent(new Event('input', {bubbles:true}));" +
                     "    scInput.dispatchEvent(new Event('change', {bubbles:true}));" +
                     "    scInput.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', keyCode:13, bubbles:true}));" +
-                    // Click red "Apply" button
                     "    for(var a=0; a<btns.length; a++){" +
                     "      var aTxt = (btns[a].innerText || btns[a].value || '').trim().toLowerCase();" +
                     "      if(aTxt === 'apply'){" +
@@ -660,37 +727,38 @@ public class WfmFlowAutomationManager {
             view.evaluateJavascript(js, result -> {
                 String res = result != null ? result.replace("\"", "") : "";
                 if (res.startsWith("OPENED_FILTER_MODAL")) {
-                    tvStatus.setText("🔍 [1/2] Membuka Filter Search Workorder Fulfillment...");
+                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Membuka Filter Search Workorder Fulfillment...", true);
                 } else if (res.startsWith("APPLIED_SC_FILTER")) {
-                    tvStatus.setText("🔍 [1/2] Filter SC Order no: " + noSc + " di-Apply! Menunggu tabel...");
+                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Filter SC Order no di-Apply! Menunggu tabel...", true);
                 } else if (res.startsWith("ROW_CLICKED")) {
-                    tvStatus.setText("📄 [1/2] Baris ditemukan! Membuka detail kartu Workorder...");
+                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📄 [1/2] Baris ditemukan! Membuka detail kartu Workorder...", true);
                 } else if (res.startsWith("DETAIL_CARD_READY")) {
-                    tvStatus.setText("✅ [1/2] Kartu Workorder tampil! Mengambil Screenshot...");
+                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✅ [1/2] Kartu Workorder tampil! Mengambil Screenshot...", true);
                     mainHandler.postDelayed(onCardReady, 850);
                     return;
                 }
-                runFlowFilterAndDetailLoop(view, dialog, noSc, flowSsCaptured, tvStatus, onCardReady, attempt + 1);
+                runFlowFilterAndDetailLoop(view, isFinished, noSc, flowSsCaptured, activity, onCardReady, attempt + 1);
             });
         }, 1200);
     }
 
     /**
-     * STAGE 3 LOOP (HEBITPRO /task-order):
+     * STAGE 3 LOOP (BACKGROUND):
      * 1. Searches NO_SC or WONUM in the /task-order table
-     * 2. Clicks the blue "✈️ To Teknisi" button
-     * 3. Clicks "Assign" on the "Data Baru" SweetAlert2 popup ("WO ini belum pernah di-assign. Lanjutkan ke form assign?")
+     * 2. Clicks the blue "To Teknisi" button
+     * 3. Clicks "Assign" on the "Data Baru" SweetAlert2 popup
      * 4. Fills the "Assign Order" modal:
-     *    - Pilih Teknisi * (leaderNik / leaderName / namaTim)
+     *    - Pilih Teknisi *
      *    - Nama ODP
      *    - Paket / Package
      *    - Latitude & Longitude
      *    - Pastes the FLOW WFM Screenshot into "SS BIMA/WFM TA" via ClipboardEvent('paste')
-     * 5. Clicks "💾 Simpan & Assign"
+     * 5. Clicks "Simpan & Assign"
      */
     private static void runHebitProTaskOrderLoop(
             WebView view,
-            Dialog dialog,
+            boolean[] isFinished,
+            Activity activity,
             String noSc,
             String wonum,
             String leaderNik,
@@ -700,14 +768,18 @@ public class WfmFlowAutomationManager {
             String paket,
             String koordinat,
             String base64Png,
-            TextView tvStatus,
+            Runnable cleanup,
             int attempt
     ) {
-        if (!dialog.isShowing() || attempt > 26) {
+        if (isFinished[0] || attempt > 28) {
+            if (attempt > 28 && !isFinished[0]) {
+                updateProgressNotification(activity, "⚠️ Timeout HebitPro", "Form assign belum selesai dalam 35 detik", false);
+                cleanup.run();
+            }
             return;
         }
         mainHandler.postDelayed(() -> {
-            if (!dialog.isShowing()) return;
+            if (isFinished[0]) return;
             injectHebitProTaskOrderAutomation(
                     view,
                     noSc,
@@ -719,18 +791,25 @@ public class WfmFlowAutomationManager {
                     paket,
                     koordinat,
                     base64Png,
-                    tvStatus,
                     statusResult -> {
                         if (statusResult != null && statusResult.contains("DONE_SUBMITTED")) {
-                            tvStatus.setText("✅ [2/2] Simpan & Assign berhasil! Notifikasi dikirim via @hebitpro_bot");
-                            Toast.makeText(view.getContext(), "✅ Order berhasil di-Assign & dikirim ke Telegram Teknisi!", Toast.LENGTH_LONG).show();
-                            mainHandler.postDelayed(() -> {
-                                if (dialog.isShowing()) dialog.dismiss();
-                            }, 3500);
+                            cancelProgressNotification(activity);
+                            Toast.makeText(activity, "✅ Order " + noSc + " berhasil di-assign & dikirim ke Telegram Teknisi!", Toast.LENGTH_LONG).show();
+                            mainHandler.postDelayed(cleanup, 2000);
                         } else {
+                            if (statusResult != null && statusResult.contains("SEARCHED_TABLE")) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [2/2] Mencari order di tabel HebitPro...", true);
+                            } else if (statusResult != null && statusResult.contains("CLICKED_TO_TEKNISI")) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✈️ [2/2] Klik [To Teknisi] → Membuka form Assign...", true);
+                            } else if (statusResult != null && statusResult.contains("SWAL_CONFIRMED")) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📋 [2/2] Konfirmasi Data Baru → Membuka Form Assign...", true);
+                            } else if (statusResult != null && (statusResult.contains("CLICKED_SIMPAN_ASSIGN") || statusResult.contains("MODAL_OPEN"))) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "💾 [2/2] Menempelkan SS WFM & Simpan Assign ke Teknisi...", true);
+                            }
                             runHebitProTaskOrderLoop(
                                     view,
-                                    dialog,
+                                    isFinished,
+                                    activity,
                                     noSc,
                                     wonum,
                                     leaderNik,
@@ -740,7 +819,7 @@ public class WfmFlowAutomationManager {
                                     paket,
                                     koordinat,
                                     base64Png,
-                                    tvStatus,
+                                    cleanup,
                                     attempt + 1
                             );
                         }
@@ -764,23 +843,6 @@ public class WfmFlowAutomationManager {
             String paket,
             String koordinat,
             String base64Png,
-            TextView tvStatus
-    ) {
-        injectHebitProTaskOrderAutomation(view, noSc, wonum, leaderNik, leaderName, namaTim, odp, paket, koordinat, base64Png, tvStatus, null);
-    }
-
-    private static void injectHebitProTaskOrderAutomation(
-            WebView view,
-            String noSc,
-            String wonum,
-            String leaderNik,
-            String leaderName,
-            String namaTim,
-            String odp,
-            String paket,
-            String koordinat,
-            String base64Png,
-            TextView tvStatus,
             StringCallback callback
     ) {
         String lat = "";
@@ -814,14 +876,14 @@ public class WfmFlowAutomationManager {
                 "var lngVal = '" + safeLng + "';" +
                 "var b64Png = '" + safeB64 + "';" +
 
-                // 1. Check if SweetAlert2 popup ("Data Baru: WO ini belum pernah di-assign. Lanjutkan ke form assign?" or post-save confirmation) is visible
+                // 1. SweetAlert2 popup ("Data Baru: WO ini belum pernah di-assign")
                 "var swalConfirm = document.querySelector('.swal2-popup.swal2-show button.swal2-confirm, .swal2-container button.swal2-confirm');" +
                 "if(swalConfirm && swalConfirm.offsetParent !== null){" +
                 "  swalConfirm.click();" +
                 "  return 'SWAL_CONFIRMED';" +
                 "}" +
 
-                // 2. Check if "Assign Order:" modal is open!
+                // 2. Assign Order modal
                 "var assignModal = null;" +
                 "var modals = document.querySelectorAll('.modal.show, .modal[style*=\"display: block\"]');" +
                 "for(var m=0; m<modals.length; m++){" +
@@ -853,7 +915,7 @@ public class WfmFlowAutomationManager {
                 "  fillInputByPlaceholderOrLabel(assignModal, '-6.', 'Latitude', latVal);" +
                 "  fillInputByPlaceholderOrLabel(assignModal, '106.', 'Longitude', lngVal);" +
 
-                // Select Technician (Pilih Teknisi *) by NIK or Name
+                // Select Technician by NIK or Name
                 "  var techSelected = false;" +
                 "  var sel = assignModal.querySelector('select');" +
                 "  if(sel){" +
@@ -900,7 +962,6 @@ public class WfmFlowAutomationManager {
                 "      } catch(e){}" +
                 "    }" +
                 "  }" +
-                // Also handle plain input autocomplete ("-- Ketik NIK atau Nama Teknisi --")
                 "  var techInput = assignModal.querySelector('input[placeholder*=\"Ketik NIK\" i], input[placeholder*=\"Nama Teknisi\" i]');" +
                 "  if(techInput && !techInput.value && (nik || techName)){" +
                 "    techInput.focus();" +
@@ -909,7 +970,7 @@ public class WfmFlowAutomationManager {
                 "    techInput.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));" +
                 "  }" +
 
-                // Paste FLOW WFM Screenshot into "SS BIMA/WFM TA" ("Paste screenshot di sini...")
+                // Paste FLOW WFM Screenshot into "SS BIMA/WFM TA"
                 "  if(b64Png && !assignModal.dataset.adingSsPasted){" +
                 "    var ssBox = assignModal.querySelector('textarea[placeholder*=\"Paste screenshot\" i], input[placeholder*=\"Paste screenshot\" i], [placeholder*=\"Paste screenshot\" i]');" +
                 "    if(ssBox){" +
@@ -935,7 +996,6 @@ public class WfmFlowAutomationManager {
                 "          try { Object.defineProperty(pasteEvt, 'clipboardData', {value:dt}); } catch(e){}" +
                 "        }" +
                 "        ssBox.dispatchEvent(pasteEvt);" +
-                // Also populate any file input in the modal associated with WFM screenshot
                 "        var fileInputs = assignModal.querySelectorAll('input[type=\"file\"]');" +
                 "        if(fileInputs.length > 0){" +
                 "          try { fileInputs[0].files = dt.files; fileInputs[0].dispatchEvent(new Event('change', {bubbles:true})); } catch(e){}" +
@@ -944,7 +1004,7 @@ public class WfmFlowAutomationManager {
                 "    }" +
                 "  }" +
 
-                // Click "Simpan & Assign" button once fields & screenshot are ready
+                // Click "Simpan & Assign" button
                 "  if(!assignModal.dataset.adingSaveClicked){" +
                 "    var modalBtns = assignModal.querySelectorAll('button, input[type=\"submit\"]');" +
                 "    for(var mb=0; mb<modalBtns.length; mb++){" +
@@ -961,7 +1021,7 @@ public class WfmFlowAutomationManager {
                 "  return 'MODAL_OPEN';" +
                 "}" +
 
-                // 3. If modal is closed AFTER we already submitted Simpan & Assign, wait 3.8s for any post-save SweetAlert
+                // 3. Post-save wait
                 "if(window.__adingHebitFormSubmitted){" +
                 "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 3800){" +
                 "    return 'WAITING_POST_SAVE';" +
@@ -969,7 +1029,7 @@ public class WfmFlowAutomationManager {
                 "  return 'DONE_SUBMITTED';" +
                 "}" +
 
-                // 4. Otherwise, we are on /task-order table: search for noSc (or wonum) and click "✈️ To Teknisi"!
+                // 4. On /task-order table: search order and click "To Teknisi"
                 "var searchTarget = noSc || wonum;" +
                 "if(searchTarget && window.__adingHebitSearched !== searchTarget){" +
                 "  if(window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable){" +
@@ -992,7 +1052,6 @@ public class WfmFlowAutomationManager {
                 "  }" +
                 "}" +
 
-                // Find matching row in table tbody tr and click "To Teknisi" button
                 "var rows = document.querySelectorAll('table tbody tr');" +
                 "for(var r=0; r<rows.length; r++){" +
                 "  var rTxt = (rows[r].innerText || '').toLowerCase();" +
@@ -1017,15 +1076,6 @@ public class WfmFlowAutomationManager {
 
         view.evaluateJavascript(js, rawResult -> {
             String res = rawResult != null ? rawResult.replace("\"", "") : "";
-            if (res.contains("SEARCHED_TABLE")) {
-                tvStatus.setText("🔍 [2/2] Mencari order " + noSc + " di tabel HebitPro...");
-            } else if (res.contains("CLICKED_TO_TEKNISI")) {
-                tvStatus.setText("✈️ [2/2] Tombol [To Teknisi] diklik! Membuka form Assign...");
-            } else if (res.contains("SWAL_CONFIRMED")) {
-                tvStatus.setText("📋 [2/2] Konfirmasi Data Baru → Membuka Form Assign Order...");
-            } else if (res.contains("CLICKED_SIMPAN_ASSIGN") || res.contains("MODAL_OPEN")) {
-                tvStatus.setText("💾 [2/2] Form & SS WFM terisi otomatis! Menyimpan & Assign ke Teknisi...");
-            }
             if (callback != null) {
                 callback.onResult(res);
             }
@@ -1037,8 +1087,8 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * Extracts unmasked customer data from Foto Ketiga (Workorder detail card on FLOW)
-     * and crops the WebView screenshot to the Workorder card container.
+     * Extracts unmasked customer data from Workorder detail card on FLOW
+     * and crops the screenshot to the Workorder card container.
      */
     private static void extractFlowCardAndCropBitmap(WebView webView, FlowExtractionCallback callback) {
         String js = "(function(){" +
@@ -1110,10 +1160,9 @@ public class WfmFlowAutomationManager {
                 try {
                     int width = webView.getWidth();
                     int height = webView.getHeight();
-                    if (width <= 0 || height <= 0) {
-                        callback.onExtracted(null, finalExtracted);
-                        return;
-                    }
+                    if (width <= 0) width = 1366;
+                    if (height <= 0) height = 900;
+
                     Bitmap fullBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
                     Canvas canvas = new Canvas(fullBitmap);
                     webView.draw(canvas);
@@ -1232,22 +1281,9 @@ public class WfmFlowAutomationManager {
         webView.evaluateJavascript(js, null);
     }
 
-    private static void injectFloatingControlWidget(WebView webView) {
-        String js = "(function(){" +
-                "if(document.getElementById('__ading_wfm_fab')) return;" +
-                "var btn = document.createElement('div');" +
-                "btn.id = '__ading_wfm_fab';" +
-                "btn.innerHTML = '⚡ FLOW & HebitPro';" +
-                "btn.style.cssText = 'position:fixed;bottom:18px;right:16px;z-index:999999;background:linear-gradient(135deg,#F9010F,#002E7A);color:#fff;padding:10px 16px;border-radius:50px;font-family:sans-serif;font-size:12px;font-weight:bold;box-shadow:0 4px 14px rgba(0,0,0,0.28);cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;';" +
-                "btn.onclick = function(){ if(window.AdingAndroid && window.AdingAndroid.openWfmHebitPanel){ window.AdingAndroid.openWfmHebitPanel(); } };" +
-                "document.body.appendChild(btn);" +
-                "})();";
-        webView.evaluateJavascript(js, null);
-    }
-
     /**
-     * Quick Control Panel Dialog to check/update FLOW & HebitPro credentials,
-     * pre-login to FLOW or HebitPro once, or manually test a Dispatch -> FLOW -> HebitPro run.
+     * Optional Control Panel Dialog in case user wants to manually update credentials
+     * or test single search & assign run.
      */
     public static void showControlPanelDialog(Activity activity, WebView mainWebView) {
         if (activity == null || activity.isFinishing()) return;
@@ -1262,14 +1298,14 @@ public class WfmFlowAutomationManager {
             scrollView.addView(container);
 
             TextView tvTitle = new TextView(activity);
-            tvTitle.setText("⚡ Otomasi Dispatch → FLOW → HebitPro");
+            tvTitle.setText("⚡ Pengaturan Akun FLOW & HebitPro");
             tvTitle.setTextSize(17f);
             tvTitle.setTypeface(null, Typeface.BOLD);
             tvTitle.setTextColor(Color.parseColor("#F9010F"));
             container.addView(tvTitle);
 
             TextView tvSub = new TextView(activity);
-            tvSub.setText("Saat Anda klik tombol [Dispatch] di ADING (Foto 1), aplikasi otomatis mencari SC Order no di Filter FLOW (Foto 2), mengambil SS kartu Workorder (Foto 3), lalu mengisi & mengirimkannya ke Teknisi melalui tombol [To Teknisi] di HebitPro (@hebitpro_bot).");
+            tvSub.setText("Otomasi berjalan sepenuhnya di latar belakang (background) saat Anda klik tombol [Dispatch] di ADING tanpa mengganggu tampilan layar.");
             tvSub.setTextSize(12f);
             tvSub.setTextColor(Color.parseColor("#4B5563"));
             tvSub.setPadding(0, dp(activity, 4), 0, dp(activity, 12));
@@ -1358,7 +1394,7 @@ public class WfmFlowAutomationManager {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private static void openSessionHelperDialog(Activity activity, String targetUrl, String title) {
+    public static void openSessionHelperDialog(Activity activity, String targetUrl, String title) {
         if (activity == null || activity.isFinishing()) return;
         SharedPreferences prefs = getPrefs(activity);
         String flowUser = prefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
