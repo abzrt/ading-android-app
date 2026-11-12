@@ -269,6 +269,9 @@ public class MainActivity extends AppCompatActivity {
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
+        // Register Native Technician Notification Channel Bridge
+        webView.addJavascriptInterface(new AdingNotificationBridge(this), "AdingAndroid");
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -289,6 +292,7 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, url);
                 progressBar.setVisibility(View.GONE);
                 swipeRefreshLayout.setRefreshing(false);
+                AdingNotificationBridge.injectWebNotificationHook(view);
             }
 
             @Override
