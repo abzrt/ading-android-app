@@ -1,6 +1,7 @@
 package id.web.ading;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -19,6 +20,8 @@ import androidx.core.content.ContextCompat;
 
 import org.json.JSONObject;
 
+import java.lang.ref.WeakReference;
+
 public class AdingNotificationBridge {
 
     private static final String PREFS_NAME = "ading_tech_prefs";
@@ -28,9 +31,20 @@ public class AdingNotificationBridge {
     private static final String DEFAULT_CHANNEL_NAME = "Task Assigned Teknisi";
 
     private final Context context;
+    private final WeakReference<Activity> activityRef;
+    private final WeakReference<WebView> webViewRef;
 
     public AdingNotificationBridge(Context context) {
         this.context = context.getApplicationContext();
+        this.activityRef = (context instanceof Activity) ? new WeakReference<>((Activity) context) : null;
+        this.webViewRef = null;
+        ensureNotificationChannel(DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_NAME);
+    }
+
+    public AdingNotificationBridge(Activity activity, WebView webView) {
+        this.context = activity.getApplicationContext();
+        this.activityRef = new WeakReference<>(activity);
+        this.webViewRef = new WeakReference<>(webView);
         ensureNotificationChannel(DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_NAME);
     }
 
@@ -214,6 +228,50 @@ public class AdingNotificationBridge {
         NotificationManagerCompat.from(context).notify(notificationId, builder.build());
     }
 
+    @JavascriptInterface
+    public void openWfmHebitPanel() {
+        Activity act = activityRef != null ? activityRef.get() : null;
+        WebView wv = webViewRef != null ? webViewRef.get() : null;
+        if (act != null) {
+            WfmFlowAutomationManager.showControlPanelDialog(act, wv);
+        }
+    }
+
+    @JavascriptInterface
+    public void saveFlowHebitCredentials(
+            String flowUser,
+            String flowPass,
+            String hebitUser,
+            String hebitPass,
+            String tgToken,
+            String tgChatId,
+            String tgThreadId
+    ) {
+        WfmFlowAutomationManager.saveCredentials(context, flowUser, flowPass, hebitUser, hebitPass, tgToken, tgChatId, tgThreadId);
+    }
+
+    @JavascriptInterface
+    public void autoCaptureWfmAndNotify(String woNumber, String aoScNumber, String taskJsonStr) {
+        Activity act = activityRef != null ? activityRef.get() : null;
+        if (act == null) return;
+        String targetWo = (woNumber != null && !woNumber.trim().isEmpty()) ? woNumber.trim() : (aoScNumber != null ? aoScNumber.trim() : "");
+        String teknisi = "";
+        String pelanggan = "";
+        String hpKoord = "";
+        String alamatAssigned = "";
+        if (taskJsonStr != null && !taskJsonStr.isEmpty()) {
+            try {
+                JSONObject obj = new JSONObject(taskJsonStr);
+                teknisi = obj.optString("teknisi", "");
+                pelanggan = obj.optString("nama_pelanggan", "-") + " | " + obj.optString("id_pelanggan", "-");
+                hpKoord = obj.optString("no_hp", "") + " | " + obj.optString("koordinat", "");
+                alamatAssigned = obj.optString("alamat", "-") + " | " + obj.optString("assigned_by", "HEBITPRO");
+            } catch (Exception ignored) {
+            }
+        }
+        WfmFlowAutomationManager.runInteractiveWfmCapture(act, targetWo, teknisi, pelanggan, hpKoord, alamatAssigned);
+    }
+
     public static void injectWebNotificationHook(WebView view) {
         if (view == null) return;
         String js = "(function(){" +
@@ -228,9 +286,11 @@ public class AdingNotificationBridge {
                 "}" +
                 "})();";
         view.evaluateJavascript(js, null);
+        WfmFlowAutomationManager.onPageLoaded(view, view.getUrl());
     }
 
     private String nonEmpty(String val) {
         return (val != null && !val.trim().isEmpty()) ? val.trim() : "-";
     }
 }
+

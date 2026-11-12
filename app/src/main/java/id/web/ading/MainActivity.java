@@ -270,7 +270,7 @@ public class MainActivity extends AppCompatActivity {
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
         // Register Native Technician Notification Channel Bridge
-        webView.addJavascriptInterface(new AdingNotificationBridge(this), "AdingAndroid");
+        webView.addJavascriptInterface(new AdingNotificationBridge(this, webView), "AdingAndroid");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -420,9 +420,14 @@ public class MainActivity extends AppCompatActivity {
         String url = uri.toString();
         String host = uri.getHost();
 
-        // 1. Keep internal dashboard navigation inside WebView
-        if (host != null && (host.equalsIgnoreCase(ALLOWED_DOMAIN) || host.toLowerCase(Locale.ROOT).endsWith("." + ALLOWED_DOMAIN))) {
-            return false;
+        // 1. Keep internal dashboard navigation inside WebView (ADING, FLOW Telkom Akses & HebitPro Kaltara)
+        if (host != null) {
+            String lowerHost = host.toLowerCase(Locale.ROOT);
+            if (lowerHost.equals(ALLOWED_DOMAIN) || lowerHost.endsWith("." + ALLOWED_DOMAIN)
+                    || lowerHost.equals("flow.telkomakses.co.id") || lowerHost.endsWith(".telkomakses.co.id")
+                    || lowerHost.equals("hebitpro-kaltara.ops.web.id") || lowerHost.endsWith(".ops.web.id")) {
+                return false;
+            }
         }
 
         // 2. Google Play Security: Intent Redirection & Hijacking Protection
