@@ -347,10 +347,14 @@ public class WfmFlowAutomationManager {
                 "window.__adingDispatchHooked = true;" +
                 "window.__adingOrdersBySc = window.__adingOrdersBySc || {};" +
                 "window.__adingTeamsCache = window.__adingTeamsCache || [];" +
-                "fetch(window.location.origin + '/api/provisioning/team-options?_t=' + Date.now())" +
-                "  .then(function(r){ return r.ok ? r.json() : []; })" +
-                "  .then(function(arr){ if(Array.isArray(arr) && arr.length > 0) window.__adingTeamsCache = arr; })" +
-                "  .catch(function(){});" +
+                "function fetchTeams(endpoint){" +
+                "  fetch(window.location.origin + endpoint + '?_t=' + Date.now())" +
+                "    .then(function(r){ return r.ok ? r.json() : []; })" +
+                "    .then(function(arr){ if(Array.isArray(arr) && arr.length > 0) window.__adingTeamsCache = window.__adingTeamsCache.concat(arr); })" +
+                "    .catch(function(){});" +
+                "}" +
+                "fetchTeams('/api/provisioning/team-options');" +
+                "fetchTeams('/api/mapping-tim');" +
                 "var origFetch = window.fetch;" +
                 "window.fetch = function(input, init){" +
                 "  var url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');" +
@@ -361,7 +365,7 @@ public class WfmFlowAutomationManager {
                 "    try {" +
                 "      if(url.indexOf('/api/provisioning/team-options') !== -1 || url.indexOf('/api/mapping-tim') !== -1){" +
                 "        resp.clone().json().then(function(arr){" +
-                "          if(Array.isArray(arr) && arr.length > 0) window.__adingTeamsCache = arr;" +
+                "          if(Array.isArray(arr) && arr.length > 0) window.__adingTeamsCache = window.__adingTeamsCache.concat(arr);" +
                 "        }).catch(function(){});" +
                 "      } else if(url.indexOf('/api/provisioning/undispatch') !== -1 || url.indexOf('/api/provisioning/search-order') !== -1){" +
                 "        resp.clone().json().then(function(json){" +
@@ -387,14 +391,16 @@ public class WfmFlowAutomationManager {
                 "            var t = window.__adingTeamsCache[i];" +
                 "            if(String(t.id) === String(timId) || t.nama_tim === namaTim){ cachedTeam = t; break; }" +
                 "          }" +
+                "          var cleanLeader = cachedTeam && cachedTeam.leader_name ? String(cachedTeam.leader_name) : (namaTim ? namaTim.split('(')[0].trim() : '');" +
+                "          var cleanNik = cachedTeam && cachedTeam.leader_nik ? String(cachedTeam.leader_nik) : (cachedTeam && cachedTeam.chief_code ? String(cachedTeam.chief_code) : '');" +
                 "          var payload = {" +
                 "            no_sc: noSc," +
                 "            wonum: item.wonum || cachedOrder.WONUM || ''," +
                 "            sto: item.sto || cachedOrder.STO || ''," +
                 "            service_area: sa || (cachedTeam ? cachedTeam.service_area : '')," +
                 "            nama_tim: namaTim," +
-                "            leader_nik: cachedTeam && cachedTeam.leader_nik ? String(cachedTeam.leader_nik) : ''," +
-                "            leader_name: cachedTeam && cachedTeam.leader_name ? String(cachedTeam.leader_name) : ''," +
+                "            leader_nik: cleanNik," +
+                "            leader_name: cleanLeader," +
                 "            paket: cachedOrder.PAKET || ''," +
                 "            odp: cachedOrder.ODP || ''," +
                 "            koordinat: cachedOrder.KORDINAT || ''," +
@@ -1172,10 +1178,14 @@ public class WfmFlowAutomationManager {
                     base64Png,
                     statusResult -> {
                         if (statusResult != null && statusResult.contains("DONE_SUBMITTED")) {
+                            isFinished[0] = true;
                             persistCookies(activity);
                             cancelProgressNotification(activity);
                             Toast.makeText(activity, "✅ Order " + noSc + " berhasil di-assign & dikirim ke Telegram Teknisi!", Toast.LENGTH_LONG).show();
                             mainHandler.postDelayed(cleanup, 1200);
+                        } else if (statusResult != null && statusResult.startsWith("SUBMIT_ERROR:")) {
+                            String err = statusResult.replace("SUBMIT_ERROR:", "").trim();
+                            handlePipelineFailure(activity, "HebitPro Kaltara", "Validasi form HebitPro gagal: " + err, cleanup);
                         } else {
                             if (statusResult != null && statusResult.contains("SEARCHED_TABLE")) {
                                 updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [2/2] Mencari order di tabel HebitPro...", true);
@@ -1183,8 +1193,14 @@ public class WfmFlowAutomationManager {
                                 updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✈️ [2/2] Klik [To Teknisi] → Membuka form Assign...", true);
                             } else if (statusResult != null && statusResult.contains("SWAL_CONFIRMED")) {
                                 updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📋 [2/2] Konfirmasi Data Baru → Membuka Form Assign...", true);
-                            } else if (statusResult != null && (statusResult.contains("CLICKED_SIMPAN_ASSIGN") || statusResult.contains("MODAL_OPEN"))) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "💾 [2/2] Menempelkan SS WFM & Simpan Assign ke Teknisi...", true);
+                            } else if (statusResult != null && (statusResult.contains("MODAL_SELECTING_TECH") || statusResult.contains("MODAL_SELECT2"))) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📋 [2/2] Memilih Teknisi: " + leaderName + " (" + leaderNik + ")...", true);
+                            } else if (statusResult != null && statusResult.contains("MODAL_SS_PASTED")) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🖼️ [2/2] Menempelkan Screenshot WFM...", true);
+                            } else if (statusResult != null && (statusResult.contains("CLICKED_SIMPAN_ASSIGN") || statusResult.contains("WAITING_POST_SAVE"))) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "💾 [2/2] Menyimpan Assign & Mengirim ke Telegram...", true);
+                            } else if (statusResult != null && statusResult.contains("MODAL_OPEN")) {
+                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📝 [2/2] Mengisi form Assign Order...", true);
                             }
                             runHebitProTaskOrderLoop(
                                     view,
@@ -1257,7 +1273,15 @@ public class WfmFlowAutomationManager {
                 "var b64Png = '" + safeB64 + "';" +
 
                 "if(window.__adingHebitFormSubmitted){" +
-                "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 2500){" +
+                "  var errAlert = document.querySelector('.alert-danger, .swal2-error, .text-danger, .invalid-feedback');" +
+                "  if(errAlert && errAlert.offsetWidth > 0 && (errAlert.innerText || '').trim().length > 3){" +
+                "    return 'SUBMIT_ERROR:' + errAlert.innerText.trim();" +
+                "  }" +
+                "  var swalSucc = document.querySelector('.swal2-success, .alert-success');" +
+                "  if(swalSucc && swalSucc.offsetWidth > 0){" +
+                "    return 'DONE_SUBMITTED';" +
+                "  }" +
+                "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 3000){" +
                 "    return 'WAITING_POST_SAVE';" +
                 "  }" +
                 "  return 'DONE_SUBMITTED';" +
@@ -1269,15 +1293,20 @@ public class WfmFlowAutomationManager {
                 "    return 'SWAL_CONFIRMED';" +
                 "  }" +
                 "}" +
-                "var swalConfirm = document.querySelector('.swal2-popup button.swal2-confirm, .swal2-container button.swal2-confirm, button.swal2-confirm, .swal-button--confirm');" +
-                "if(!swalConfirm){" +
-                "  var allSwalBtns = document.querySelectorAll('.swal2-popup button, .swal2-container button, .sweet-alert button');" +
-                "  for(var sb=0; sb<allSwalBtns.length; sb++){" +
-                "    var st = (allSwalBtns[sb].innerText || allSwalBtns[sb].textContent || '').trim().toLowerCase();" +
-                "    if(st === 'assign' || st === 'ya' || st.indexOf('lanjut') !== -1 || st === 'ok' || st === 'yes'){" +
-                "      swalConfirm = allSwalBtns[sb]; break;" +
+                "var swalConfirm = null;" +
+                "var popups = document.querySelectorAll('.swal2-popup, .swal2-container, .sweet-alert');" +
+                "for(var p=0; p<popups.length; p++){" +
+                "  var pBtns = popups[p].querySelectorAll('button, a, .swal2-confirm');" +
+                "  for(var pb=0; pb<pBtns.length; pb++){" +
+                "    var pbt = (pBtns[pb].innerText || pBtns[pb].textContent || '').trim().toLowerCase();" +
+                "    if(pbt === 'assign' || pbt === 'ya' || pbt.indexOf('lanjut') !== -1 || pbt === 'ok' || pBtns[pb].classList.contains('swal2-confirm')){" +
+                "      swalConfirm = pBtns[pb]; break;" +
                 "    }" +
                 "  }" +
+                "  if(swalConfirm) break;" +
+                "}" +
+                "if(!swalConfirm){" +
+                "  swalConfirm = document.querySelector('.swal2-popup button.swal2-confirm, .swal2-container button.swal2-confirm, button.swal2-confirm, .swal-button--confirm');" +
                 "}" +
                 "if(swalConfirm){" +
                 "  swalConfirm.click();" +
@@ -1285,10 +1314,22 @@ public class WfmFlowAutomationManager {
                 "  return 'SWAL_CONFIRMED';" +
                 "}" +
 
+                "function isVisibleModal(el){" +
+                "  if(!el) return false;" +
+                "  if(el.classList && (el.classList.contains('swal2-popup') || el.classList.contains('swal2-container') || el.classList.contains('sweet-alert'))) return false;" +
+                "  var style = window.getComputedStyle ? window.getComputedStyle(el) : el.style;" +
+                "  if(style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;" +
+                "  var hasClass = el.classList && (el.classList.contains('show') || el.classList.contains('in'));" +
+                "  var hasDisplay = el.style && el.style.display && el.style.display.indexOf('block') !== -1;" +
+                "  var hasDim = (el.offsetWidth > 0 && el.offsetHeight > 0);" +
+                "  return (hasClass || hasDisplay || hasDim);" +
+                "}" +
+
                 "var assignModal = null;" +
-                "var modals = document.querySelectorAll('.modal.show, .modal[style*=\"display: block\"], .modal, [role=\"dialog\"]');" +
+                "var modals = document.querySelectorAll('.modal.show, .modal[style*=\"display: block\"], .modal.in, .modal');" +
                 "for(var m=0; m<modals.length; m++){" +
-                "  var mTxt = modals[m].innerText || modals[m].textContent || '';" +
+                "  if(!isVisibleModal(modals[m])) continue;" +
+                "  var mTxt = modals[m].innerText || '';" +
                 "  if(mTxt.indexOf('Assign Order') !== -1 || mTxt.indexOf('Pilih Teknisi') !== -1 || mTxt.indexOf('Nama ODP') !== -1){" +
                 "    assignModal = modals[m].closest('.modal') || modals[m]; break;" +
                 "  }" +
@@ -1317,46 +1358,67 @@ public class WfmFlowAutomationManager {
                 "  fillInputByPlaceholderOrLabel(assignModal, '-6.', 'Latitude', latVal);" +
                 "  fillInputByPlaceholderOrLabel(assignModal, '106.', 'Longitude', lngVal);" +
 
+                "  var cleanLeader = techName || (timName ? timName.split('(')[0].trim() : '');" +
+                "  var searchTerm = (nik || cleanLeader || '').trim();" +
                 "  var techSelected = false;" +
                 "  var sel = assignModal.querySelector('select');" +
                 "  if(sel){" +
-                "    var opts = sel.querySelectorAll('option');" +
-                "    var matchedVal = '';" +
-                "    for(var o=0; o<opts.length; o++){" +
-                "      var oTxt = (opts[o].innerText || opts[o].textContent || '').toLowerCase();" +
-                "      var oVal = (opts[o].value || '').toLowerCase();" +
-                "      if((nik && (oTxt.indexOf(nik.toLowerCase()) !== -1 || oVal.indexOf(nik.toLowerCase()) !== -1)) ||" +
-                "         (techName && oTxt.indexOf(techName.toLowerCase()) !== -1) ||" +
-                "         (timName && oTxt.indexOf(timName.toLowerCase()) !== -1)){" +
-                "        matchedVal = opts[o].value;" +
-                "        opts[o].selected = true;" +
-                "        break;" +
+                "    if(sel.value && sel.value !== '' && sel.value !== '0'){" +
+                "      techSelected = true;" +
+                "    }" +
+                "    if(!techSelected){" +
+                "      var opts = sel.querySelectorAll('option');" +
+                "      for(var o=0; o<opts.length; o++){" +
+                "        var oTxt = (opts[o].innerText || opts[o].textContent || '').toLowerCase();" +
+                "        var oVal = (opts[o].value || '').toLowerCase();" +
+                "        var mOpt = (nik && (oTxt.indexOf(nik.toLowerCase()) !== -1 || oVal.indexOf(nik.toLowerCase()) !== -1)) ||" +
+                "                   (cleanLeader && oTxt.indexOf(cleanLeader.toLowerCase()) !== -1) ||" +
+                "                   (timName && oTxt.indexOf(timName.toLowerCase()) !== -1);" +
+                "        if(mOpt && opts[o].value){" +
+                "          opts[o].selected = true;" +
+                "          sel.value = opts[o].value;" +
+                "          sel.dispatchEvent(new Event('change', {bubbles:true}));" +
+                "          if(window.jQuery){ try{ window.jQuery(sel).val(opts[o].value).trigger('change'); }catch(e){} }" +
+                "          techSelected = true;" +
+                "          break;" +
+                "        }" +
                 "      }" +
                 "    }" +
-                "    if(matchedVal){" +
-                "      sel.value = matchedVal;" +
-                "      sel.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "      if(window.jQuery){ try{ window.jQuery(sel).val(matchedVal).trigger('change'); }catch(e){} }" +
-                "      techSelected = true;" +
-                "    } else if(window.jQuery && (nik || techName)){" +
+                "    if(!techSelected && window.jQuery){" +
                 "      try {" +
-                "        if(!sel.dataset.adingSelect2Opened){" +
-                "          sel.dataset.adingSelect2Opened = '1';" +
+                "        var sField = document.querySelector('.select2-container--open .select2-search__field, .select2-search--dropdown .select2-search__field');" +
+                "        if(!sField){" +
                 "          window.jQuery(sel).select2('open');" +
-                "          var sField = document.querySelector('.select2-container--open .select2-search__field');" +
-                "          if(sField){" +
-                "            sField.value = nik || techName;" +
+                "          return 'MODAL_SELECT2_OPENING';" +
+                "        } else {" +
+                "          if(!assignModal.dataset.adingTechTyped){" +
+                "            assignModal.dataset.adingTechTyped = '1';" +
+                "            sField.value = searchTerm;" +
                 "            sField.dispatchEvent(new Event('input', {bubbles:true}));" +
                 "            sField.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));" +
-                "          }" +
-                "        } else {" +
-                "          var sRes = document.querySelectorAll('.select2-results__option');" +
-                "          for(var sr=0; sr<sRes.length; sr++){" +
-                "            var srTxt = (sRes[sr].innerText || '').toLowerCase();" +
-                "            if((nik && srTxt.indexOf(nik.toLowerCase()) !== -1) || (techName && srTxt.indexOf(techName.toLowerCase()) !== -1)){" +
-                "              sRes[sr].click();" +
-                "              techSelected = true;" +
-                "              break;" +
+                "            window.jQuery(sField).val(searchTerm).trigger('input').trigger('keyup').trigger('change');" +
+                "            return 'MODAL_SELECT2_SEARCHING';" +
+                "          } else {" +
+                "            var sRes = document.querySelectorAll('.select2-results__option, li.select2-results__option');" +
+                "            for(var sr=0; sr<sRes.length; sr++){" +
+                "              var srTxt = (sRes[sr].innerText || sRes[sr].textContent || '').toLowerCase();" +
+                "              var srMatch = (nik && srTxt.indexOf(nik.toLowerCase()) !== -1) ||" +
+                "                            (cleanLeader && srTxt.indexOf(cleanLeader.toLowerCase()) !== -1) ||" +
+                "                            (timName && srTxt.indexOf(timName.toLowerCase()) !== -1);" +
+                "              if(srMatch){" +
+                "                sRes[sr].click();" +
+                "                sRes[sr].dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));" +
+                "                techSelected = true;" +
+                "                break;" +
+                "              }" +
+                "            }" +
+                "            if(!techSelected && sRes.length === 1){" +
+                "              var singleSr = (sRes[0].innerText || '').toLowerCase();" +
+                "              if(singleSr.indexOf('search') === -1 && singleSr.indexOf('tidak') === -1 && singleSr.indexOf('no result') === -1 && singleSr.length > 2){" +
+                "                sRes[0].click();" +
+                "                sRes[0].dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));" +
+                "                techSelected = true;" +
+                "              }" +
                 "            }" +
                 "          }" +
                 "        }" +
@@ -1364,47 +1426,64 @@ public class WfmFlowAutomationManager {
                 "    }" +
                 "  }" +
                 "  var techInput = assignModal.querySelector('input[placeholder*=\"Ketik NIK\" i], input[placeholder*=\"Nama Teknisi\" i]');" +
-                "  if(techInput && !techInput.value && (nik || techName)){" +
+                "  if(techInput && !techInput.value && searchTerm){" +
                 "    techInput.focus();" +
-                "    techInput.value = nik || techName;" +
+                "    techInput.value = searchTerm;" +
                 "    techInput.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "    techInput.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));" +
+                "    techInput.dispatchEvent(new Event('change', {bubbles:true}));" +
+                "    techSelected = true;" +
                 "  }" +
-
+                "" +
+                "  var isTechReady = techSelected || (sel && sel.value && sel.value !== '' && sel.value !== '0');" +
+                "" +
                 "  if(b64Png && !assignModal.dataset.adingSsPasted){" +
-                "    var ssBox = assignModal.querySelector('textarea[placeholder*=\"Paste screenshot\" i], input[placeholder*=\"Paste screenshot\" i], [placeholder*=\"Paste screenshot\" i]');" +
-                "    if(ssBox){" +
-                "      try {" +
-                "        assignModal.dataset.adingSsPasted = '1';" +
-                "        var bStr = atob(b64Png);" +
-                "        var ab = new ArrayBuffer(bStr.length);" +
-                "        var ia = new Uint8Array(ab);" +
-                "        for(var i=0; i<bStr.length; i++){ ia[i] = bStr.charCodeAt(i); }" +
-                "        var blob = new Blob([ab], {type:'image/png'});" +
-                "        var file = new File([blob], 'ss_wfm_' + noSc + '.png', {type:'image/png', lastModified:Date.now()});" +
-                "        var dt = new DataTransfer();" +
-                "        dt.items.add(file);" +
+                "    assignModal.dataset.adingSsPasted = '1';" +
+                "    try {" +
+                "      var bStr = atob(b64Png);" +
+                "      var ab = new ArrayBuffer(bStr.length);" +
+                "      var ia = new Uint8Array(ab);" +
+                "      for(var i=0; i<bStr.length; i++){ ia[i] = bStr.charCodeAt(i); }" +
+                "      var blob = new Blob([ab], {type:'image/png'});" +
+                "      var file = new File([blob], 'ss_wfm_' + noSc + '.png', {type:'image/png', lastModified:Date.now()});" +
+                "      var dt = new DataTransfer();" +
+                "      dt.items.add(file);" +
+                "" +
+                "      var ssBox = assignModal.querySelector('textarea[placeholder*=\"Paste screenshot\" i], [placeholder*=\"Paste screenshot\" i], textarea');" +
+                "      if(ssBox){" +
                 "        ssBox.focus();" +
                 "        ssBox.click();" +
-                "        var pasteEvt;" +
-                "        try {" +
-                "          pasteEvt = new ClipboardEvent('paste', {bubbles:true, cancelable:true, clipboardData:dt});" +
-                "        } catch(e){" +
-                "          pasteEvt = new Event('paste', {bubbles:true, cancelable:true});" +
-                "        }" +
-                "        if(!pasteEvt.clipboardData || !pasteEvt.clipboardData.items || pasteEvt.clipboardData.items.length === 0){" +
-                "          try { Object.defineProperty(pasteEvt, 'clipboardData', {value:dt}); } catch(e){}" +
-                "        }" +
+                "        var pasteEvt = new ClipboardEvent('paste', {bubbles:true, cancelable:true, clipboardData:dt});" +
                 "        ssBox.dispatchEvent(pasteEvt);" +
-                "        var fileInputs = assignModal.querySelectorAll('input[type=\"file\"]');" +
-                "        if(fileInputs.length > 0){" +
-                "          try { fileInputs[0].files = dt.files; fileInputs[0].dispatchEvent(new Event('change', {bubbles:true})); } catch(e){}" +
+                "        window.dispatchEvent(pasteEvt);" +
+                "        document.dispatchEvent(pasteEvt);" +
+                "      }" +
+                "      var fileInputs = assignModal.querySelectorAll('input[type=\"file\"]');" +
+                "      for(var fi=0; fi<fileInputs.length; fi++){" +
+                "        try {" +
+                "          fileInputs[fi].files = dt.files;" +
+                "          fileInputs[fi].dispatchEvent(new Event('change', {bubbles:true}));" +
+                "        } catch(e){}" +
+                "      }" +
+                "      var hiddenB64 = assignModal.querySelectorAll('input[type=\"hidden\"], textarea');" +
+                "      for(var hi=0; hi<hiddenB64.length; hi++){" +
+                "        var hn = (hiddenB64[hi].name || hiddenB64[hi].id || '').toLowerCase();" +
+                "        if(hn.indexOf('ss') !== -1 || hn.indexOf('screenshot') !== -1 || hn.indexOf('foto') !== -1 || hn.indexOf('image') !== -1){" +
+                "          if(!hiddenB64[hi].value){" +
+                "            hiddenB64[hi].value = 'data:image/png;base64,' + b64Png;" +
+                "            hiddenB64[hi].dispatchEvent(new Event('input', {bubbles:true}));" +
+                "            hiddenB64[hi].dispatchEvent(new Event('change', {bubbles:true}));" +
+                "          }" +
                 "        }" +
-                "      } catch(e){}" +
-                "    }" +
+                "      }" +
+                "    } catch(e){}" +
+                "    return 'MODAL_SS_PASTED';" +
                 "  }" +
-
-                "  if(!assignModal.dataset.adingSaveClicked){" +
+                "" +
+                "  if(!isTechReady){" +
+                "    return 'MODAL_SELECTING_TECH';" +
+                "  }" +
+                "" +
+                "  if(isTechReady && !assignModal.dataset.adingSaveClicked){" +
                 "    var modalBtns = assignModal.querySelectorAll('button, input[type=\"submit\"]');" +
                 "    for(var mb=0; mb<modalBtns.length; mb++){" +
                 "      var mbTxt = (modalBtns[mb].innerText || modalBtns[mb].value || '').toLowerCase();" +
@@ -1414,6 +1493,7 @@ public class WfmFlowAutomationManager {
                 "        window.__adingHebitSaveTime = Date.now();" +
                 "        modalBtns[mb].click();" +
                 "        modalBtns[mb].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));" +
+                "        if(window.jQuery){ try{ window.jQuery(modalBtns[mb]).trigger('click'); }catch(e){} }" +
                 "        return 'CLICKED_SIMPAN_ASSIGN';" +
                 "      }" +
                 "    }" +
