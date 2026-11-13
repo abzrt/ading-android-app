@@ -558,6 +558,7 @@ public class WfmFlowAutomationManager {
             final String[] resolvedWonum = {initialWonum != null ? initialWonum : ""};
             final boolean[] isFinished = {false};
             final boolean[] isWaitingForOtp = {false};
+            final boolean[] hebitLoopStarted = {false};
 
             final ViewGroup finalRoot = root;
             Runnable cleanup = () -> {
@@ -674,22 +675,25 @@ public class WfmFlowAutomationManager {
                         } else if (!url.contains("/task-order")) {
                             view.loadUrl(HEBITPRO_TASK_ORDER_URL);
                         } else {
-                            runHebitProTaskOrderLoop(
-                                    view,
-                                    isFinished,
-                                    activity,
-                                    noSc,
-                                    resolvedWonum[0],
-                                    leaderNik,
-                                    leaderName,
-                                    namaTim,
-                                    odp,
-                                    paket,
-                                    koordinat,
-                                    capturedBase64Png[0],
-                                    cleanup,
-                                    0
-                            );
+                            if (!hebitLoopStarted[0]) {
+                                hebitLoopStarted[0] = true;
+                                runHebitProTaskOrderLoop(
+                                        view,
+                                        isFinished,
+                                        activity,
+                                        noSc,
+                                        resolvedWonum[0],
+                                        leaderNik,
+                                        leaderName,
+                                        namaTim,
+                                        odp,
+                                        paket,
+                                        koordinat,
+                                        capturedBase64Png[0],
+                                        cleanup,
+                                        0
+                                );
+                            }
                         }
                     }
                 }
@@ -736,12 +740,12 @@ public class WfmFlowAutomationManager {
             Runnable cleanup,
             int attempt
     ) {
-        if (isFinished[0] || flowSsCaptured[0] || attempt > 85) {
-            if (attempt > 85 && !flowSsCaptured[0] && !isFinished[0]) {
+        if (isFinished[0] || flowSsCaptured[0] || attempt > 110) {
+            if (attempt > 110 && !flowSsCaptured[0] && !isFinished[0]) {
                 handlePipelineFailure(
                         activity,
                         "FLOW Telkom Akses",
-                        "Waktu habis (Timeout 30 detik) saat memproses data di FLOW Telkom Akses. Tidak dapat menemukan Workorder atau sesi login kadaluarsa.",
+                        "Waktu habis (Timeout) saat memproses data di FLOW Telkom Akses. Tidak dapat menemukan Workorder atau sesi login kadaluarsa.",
                         cleanup
                 );
             }
@@ -751,9 +755,9 @@ public class WfmFlowAutomationManager {
         mainHandler.postDelayed(() -> {
             if (isFinished[0] || flowSsCaptured[0]) return;
 
-            // Pause polling while waiting for user to type OTP in the dialog
+            // Pause polling while waiting for user to type OTP in the dialog - do NOT increment attempt
             if (isWaitingForOtp[0]) {
-                runFlowPipelineFastLoop(view, isFinished, noSc, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
+                runFlowPipelineFastLoop(view, isFinished, noSc, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt);
                 return;
             }
 
@@ -771,7 +775,7 @@ public class WfmFlowAutomationManager {
                     "  var nodes = document.querySelectorAll('label, div, span, td');" +
                     "  for(var i=0; i<nodes.length; i++){" +
                     "    var n = nodes[i];" +
-                    "    if(n.children.length > 1) continue;" +
+                    "    if(n.children.length > 2) continue;" +
                     "    var txt = (n.innerText || '').trim();" +
                     "    if(txt.toLowerCase().indexOf(lbl.toLowerCase()) !== -1){" +
                     "      var sib = n.nextElementSibling;" +
@@ -791,7 +795,15 @@ public class WfmFlowAutomationManager {
                     "}" +
                     "var scDetailVal = getDetailVal('SC Order No');" +
                     "var woDetailVal = getDetailVal('Workorder:');" +
-                    "if(scDetailVal && scDetailVal.toLowerCase().indexOf(targetLower) !== -1 && woDetailVal.toUpperCase().indexOf('WO') !== -1){" +
+                    "if(!scDetailVal || !woDetailVal){" +
+                    "  var allInputs = document.querySelectorAll('input, textarea');" +
+                    "  for(var ai=0; ai<allInputs.length; ai++){" +
+                    "    var aiv = (allInputs[ai].value || '').toLowerCase();" +
+                    "    if(aiv.indexOf(targetLower) !== -1){ scDetailVal = aiv; }" +
+                    "    if(aiv.toUpperCase().indexOf('WO0') !== -1 || (aiv.toUpperCase().indexOf('WO') === 0 && aiv.length >= 8)){ woDetailVal = aiv; }" +
+                    "  }" +
+                    "}" +
+                    "if(scDetailVal && scDetailVal.toLowerCase().indexOf(targetLower) !== -1 && woDetailVal && woDetailVal.toUpperCase().indexOf('WO') !== -1){" +
                     "  document.querySelectorAll('.modal.show, .modal-backdrop').forEach(function(m){ m.style.display='none'; });" +
                     "  return 'DETAIL_CARD_READY:' + woDetailVal;" +
                     "}" +
@@ -799,6 +811,11 @@ public class WfmFlowAutomationManager {
                     // 2. ON /workorder TABLE: FILTER & CLICK ROW
                     "if(path.indexOf('/workorder') !== -1){" +
                     "  document.querySelectorAll('.modal-backdrop').forEach(function(b){ if(!document.querySelector('.modal.show')) b.remove(); });" +
+                    "  if(window.__adingRowClickTime && (Date.now() - window.__adingRowClickTime) > 3500){" +
+                    "    var oldClickedRows = document.querySelectorAll('[data-ading-clicked]');" +
+                    "    for(var ocr=0; ocr<oldClickedRows.length; ocr++){ delete oldClickedRows[ocr].dataset.adingClicked; }" +
+                    "    delete window.__adingRowClickTime;" +
+                    "  }" +
                     "  if(window.__adingFlowFilterApplied === targetSc){" +
                     "    var rows = document.querySelectorAll('table tbody tr');" +
                     "    for(var r=0; r<rows.length; r++){" +
@@ -806,6 +823,7 @@ public class WfmFlowAutomationManager {
                     "      if(rTxt.toLowerCase().indexOf(targetLower) !== -1 || (rows.length === 1 && rTxt.toUpperCase().indexOf('WO0') !== -1)){" +
                     "        if(!rows[r].dataset.adingClicked){" +
                     "          rows[r].dataset.adingClicked = '1';" +
+                    "          window.__adingRowClickTime = Date.now();" +
                     "          var clickTarget = rows[r].querySelector('a, button');" +
                     "          if(!clickTarget){" +
                     "            var tds = rows[r].querySelectorAll('td');" +
@@ -1128,12 +1146,12 @@ public class WfmFlowAutomationManager {
             Runnable cleanup,
             int attempt
     ) {
-        if (isFinished[0] || attempt > 80) {
-            if (attempt > 80 && !isFinished[0]) {
+        if (isFinished[0] || attempt > 110) {
+            if (attempt > 110 && !isFinished[0]) {
                 handlePipelineFailure(
                         activity,
                         "HebitPro Kaltara",
-                        "Waktu habis (Timeout 35 detik) saat mencari order " + noSc + " atau membuka form assign di HebitPro Kaltara.",
+                        "Waktu habis (Timeout) saat mencari order " + noSc + " atau membuka form assign di HebitPro Kaltara.",
                         cleanup
                 );
             }
@@ -1238,26 +1256,41 @@ public class WfmFlowAutomationManager {
                 "var lngVal = '" + safeLng + "';" +
                 "var b64Png = '" + safeB64 + "';" +
 
+                "if(window.__adingHebitFormSubmitted){" +
+                "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 2500){" +
+                "    return 'WAITING_POST_SAVE';" +
+                "  }" +
+                "  return 'DONE_SUBMITTED';" +
+                "}" +
+
+                "if(window.Swal && typeof window.Swal.isVisible === 'function' && window.Swal.isVisible()){" +
+                "  if(typeof window.Swal.clickConfirm === 'function'){" +
+                "    window.Swal.clickConfirm();" +
+                "    return 'SWAL_CONFIRMED';" +
+                "  }" +
+                "}" +
                 "var swalConfirm = document.querySelector('.swal2-popup button.swal2-confirm, .swal2-container button.swal2-confirm, button.swal2-confirm, .swal-button--confirm');" +
                 "if(!swalConfirm){" +
                 "  var allSwalBtns = document.querySelectorAll('.swal2-popup button, .swal2-container button, .sweet-alert button');" +
                 "  for(var sb=0; sb<allSwalBtns.length; sb++){" +
                 "    var st = (allSwalBtns[sb].innerText || allSwalBtns[sb].textContent || '').trim().toLowerCase();" +
-                "    if(st === 'assign' || st === 'ya' || st.indexOf('lanjut') !== -1){" +
+                "    if(st === 'assign' || st === 'ya' || st.indexOf('lanjut') !== -1 || st === 'ok' || st === 'yes'){" +
                 "      swalConfirm = allSwalBtns[sb]; break;" +
                 "    }" +
                 "  }" +
                 "}" +
                 "if(swalConfirm){" +
                 "  swalConfirm.click();" +
+                "  swalConfirm.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));" +
                 "  return 'SWAL_CONFIRMED';" +
                 "}" +
 
                 "var assignModal = null;" +
-                "var modals = document.querySelectorAll('.modal.show, .modal[style*=\"display: block\"]');" +
+                "var modals = document.querySelectorAll('.modal.show, .modal[style*=\"display: block\"], .modal, [role=\"dialog\"]');" +
                 "for(var m=0; m<modals.length; m++){" +
-                "  if((modals[m].innerText || '').indexOf('Assign Order') !== -1 || (modals[m].innerText || '').indexOf('Pilih Teknisi') !== -1){" +
-                "    assignModal = modals[m]; break;" +
+                "  var mTxt = modals[m].innerText || modals[m].textContent || '';" +
+                "  if(mTxt.indexOf('Assign Order') !== -1 || mTxt.indexOf('Pilih Teknisi') !== -1 || mTxt.indexOf('Nama ODP') !== -1){" +
+                "    assignModal = modals[m].closest('.modal') || modals[m]; break;" +
                 "  }" +
                 "}" +
                 "if(assignModal){" +
@@ -1379,7 +1412,8 @@ public class WfmFlowAutomationManager {
                 "        assignModal.dataset.adingSaveClicked = '1';" +
                 "        window.__adingHebitFormSubmitted = true;" +
                 "        window.__adingHebitSaveTime = Date.now();" +
-                "        setTimeout(function(){ modalBtns[mb].click(); }, 350);" +
+                "        modalBtns[mb].click();" +
+                "        modalBtns[mb].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));" +
                 "        return 'CLICKED_SIMPAN_ASSIGN';" +
                 "      }" +
                 "    }" +
@@ -1387,46 +1421,47 @@ public class WfmFlowAutomationManager {
                 "  return 'MODAL_OPEN';" +
                 "}" +
 
-                "if(window.__adingHebitFormSubmitted){" +
-                "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 2500){" +
-                "    return 'WAITING_POST_SAVE';" +
-                "  }" +
-                "  return 'DONE_SUBMITTED';" +
-                "}" +
-
                 "var searchTarget = (noSc || wonum || '').trim();" +
                 "if(searchTarget && window.__adingHebitSearched !== searchTarget){" +
-                "  window.__adingHebitSearched = searchTarget;" +
+                "  var didSearch = false;" +
                 "  if(window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable){" +
                 "    try {" +
                 "      var dtApi = window.jQuery.fn.dataTable.tables({api:true});" +
-                "      if(dtApi && dtApi.search){ dtApi.search(searchTarget).draw(); }" +
+                "      if(dtApi && dtApi.search){ dtApi.search(searchTarget).draw(); didSearch = true; }" +
                 "    } catch(e){}" +
                 "  }" +
-                "  var sInp = document.querySelector('input[type=\"search\"], .dataTables_filter input');" +
+                "  var sInp = document.querySelector('input[type=\"search\"], .dataTables_filter input, #search, [name=\"search\"]');" +
                 "  if(sInp){" +
                 "    sInp.value = searchTarget;" +
                 "    sInp.dispatchEvent(new Event('input', {bubbles:true}));" +
                 "    sInp.dispatchEvent(new Event('change', {bubbles:true}));" +
                 "    sInp.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', keyCode:13, bubbles:true}));" +
+                "    didSearch = true;" +
                 "  }" +
-                "  return 'SEARCHED_TABLE';" +
+                "  if(didSearch){" +
+                "    window.__adingHebitSearched = searchTarget;" +
+                "    return 'SEARCHED_TABLE';" +
+                "  }" +
                 "}" +
 
-                "if(window.__adingToTeknisiClickTime && (Date.now() - window.__adingToTeknisiClickTime) > 4000){" +
+                "if(window.__adingToTeknisiClickTime && (Date.now() - window.__adingToTeknisiClickTime) > 3500){" +
                 "  var oldClicked = document.querySelectorAll('[data-ading-to-teknisi-clicked]');" +
                 "  for(var oc=0; oc<oldClicked.length; oc++){ delete oldClicked[oc].dataset.adingToTeknisiClicked; }" +
                 "  delete window.__adingToTeknisiClickTime;" +
                 "}" +
 
+                "var scSub = noSc && noSc.length > 14 ? noSc.substring(0, 15).toLowerCase() : (noSc || '').toLowerCase();" +
+                "var cleanWo = wonum ? wonum.replace(/^WO/i, 'W0').toLowerCase() : '';" +
+                "var rawWo = wonum ? wonum.toLowerCase() : '';" +
+
                 "var rows = document.querySelectorAll('table tbody tr');" +
                 "for(var r=0; r<rows.length; r++){" +
                 "  var rTxt = (rows[r].innerText || '').toLowerCase();" +
-                "  var matchSc = noSc && rTxt.indexOf(noSc.toLowerCase()) !== -1;" +
-                "  var matchWo = wonum && rTxt.indexOf(wonum.toLowerCase()) !== -1;" +
+                "  var matchSc = (noSc && rTxt.indexOf(noSc.toLowerCase()) !== -1) || (scSub && rTxt.indexOf(scSub) !== -1);" +
+                "  var matchWo = (rawWo && rTxt.indexOf(rawWo) !== -1) || (cleanWo && rTxt.indexOf(cleanWo) !== -1);" +
                 "  var singleMatch = (rows.length === 1 && rTxt.indexOf('no data') === -1 && rTxt.indexOf('tidak') === -1 && rTxt.indexOf('loading') === -1 && rTxt.trim().length > 10);" +
                 "  if(matchSc || matchWo || singleMatch){" +
-                "    var rowBtns = rows[r].querySelectorAll('button, a');" +
+                "    var rowBtns = rows[r].querySelectorAll('button, a, [role=\"button\"], .btn');" +
                 "    for(var b=0; b<rowBtns.length; b++){" +
                 "      var bTxt = (rowBtns[b].innerText || rowBtns[b].title || '').toLowerCase().replace(/\\s+/g, ' ');" +
                 "      var hasTelegramIcon = rowBtns[b].querySelector('.fa-telegram, .fa-telegram-plane, .fa-paper-plane, .bi-send, .bi-telegram') !== null;" +
@@ -1435,6 +1470,8 @@ public class WfmFlowAutomationManager {
                 "          rowBtns[b].dataset.adingToTeknisiClicked = '1';" +
                 "          window.__adingToTeknisiClickTime = Date.now();" +
                 "          rowBtns[b].click();" +
+                "          rowBtns[b].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));" +
+                "          if(window.jQuery){ try{ window.jQuery(rowBtns[b]).trigger('click'); }catch(e){} }" +
                 "          return 'CLICKED_TO_TEKNISI';" +
                 "        }" +
                 "      }" +
