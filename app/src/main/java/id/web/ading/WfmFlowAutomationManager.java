@@ -58,48 +58,47 @@ public class WfmFlowAutomationManager {
 
     public static final String FLOW_LOGIN_URL = "https://flow.telkomakses.co.id/";
     public static final String FLOW_WORKORDER_URL = "https://flow.telkomakses.co.id/workorder";
-    public static final String HEBITPRO_URL = "https://hebitpro-kaltara.ops.web.id/";
-    public static final String HEBITPRO_TASK_ORDER_URL = "https://hebitpro-kaltara.ops.web.id/task-order";
-    public static final String HEBITPRO_TEK_PROVI_URL = "https://hebitpro-kaltara.ops.web.id/master/tek-provi";
     public static final String ADING_URL = "https://ading.web.id/";
 
     public static final String DEFAULT_FLOW_USER = "16830482";
     public static final String DEFAULT_FLOW_PASS = "Narindo@2026";
-    public static final String DEFAULT_HEBIT_USER = "irfan_nnk";
-    public static final String DEFAULT_HEBIT_PASS = "Hebitpro2026";
 
-    private static final String PREFS_NAME = "ading_wfm_hebit_prefs";
+    private static final String PREFS_NAME = "ading_wfm_prefs";
     private static final String KEY_FLOW_USER = "flow_username";
     private static final String KEY_FLOW_PASS = "flow_password";
-    private static final String KEY_HEBIT_USER = "hebit_username";
-    private static final String KEY_HEBIT_PASS = "hebit_password";
 
     private static final String KEY_FLOW_COOKIES = "flow_saved_cookies";
-    private static final String KEY_HEBIT_COOKIES = "hebit_saved_cookies";
 
     private static final String BG_CHANNEL_ID = "ading_bg_dispatch_pipeline";
-    private static final String BG_CHANNEL_NAME = "Otomasi Background FLOW & HebitPro";
+    private static final String BG_CHANNEL_NAME = "Otomasi Background WFM FLOW";
     private static final int NOTIF_PROGRESS_ID = 8801;
 
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     public static SharedPreferences getPrefs(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = null;
         if (prefs.getString(KEY_FLOW_USER, "").isEmpty()) {
-            editor = prefs.edit();
-            editor.putString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
-            editor.putString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
-        }
-        if (prefs.getString(KEY_HEBIT_USER, "").isEmpty()) {
-            if (editor == null) editor = prefs.edit();
-            editor.putString(KEY_HEBIT_USER, DEFAULT_HEBIT_USER);
-            editor.putString(KEY_HEBIT_PASS, DEFAULT_HEBIT_PASS);
-        }
-        if (editor != null) {
+            SharedPreferences oldPrefs = context.getSharedPreferences("ading_wfm_hebit_prefs", Context.MODE_PRIVATE);
+            String oldFlowUser = oldPrefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
+            String oldFlowPass = oldPrefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(KEY_FLOW_USER, oldFlowUser);
+            editor.putString(KEY_FLOW_PASS, oldFlowPass);
             editor.apply();
         }
         return prefs;
+    }
+
+    public static void saveCredentials(
+            Context context,
+            String flowUser,
+            String flowPass
+    ) {
+        SharedPreferences prefs = getPrefs(context);
+        prefs.edit()
+                .putString(KEY_FLOW_USER, (flowUser != null && !flowUser.trim().isEmpty()) ? flowUser.trim() : DEFAULT_FLOW_USER)
+                .putString(KEY_FLOW_PASS, (flowPass != null && !flowPass.isEmpty()) ? flowPass : DEFAULT_FLOW_PASS)
+                .apply();
     }
 
     public static void saveCredentials(
@@ -109,17 +108,11 @@ public class WfmFlowAutomationManager {
             String hebitUser,
             String hebitPass
     ) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit()
-                .putString(KEY_FLOW_USER, (flowUser != null && !flowUser.trim().isEmpty()) ? flowUser.trim() : DEFAULT_FLOW_USER)
-                .putString(KEY_FLOW_PASS, (flowPass != null && !flowPass.isEmpty()) ? flowPass : DEFAULT_FLOW_PASS)
-                .putString(KEY_HEBIT_USER, (hebitUser != null && !hebitUser.trim().isEmpty()) ? hebitUser.trim() : DEFAULT_HEBIT_USER)
-                .putString(KEY_HEBIT_PASS, (hebitPass != null && !hebitPass.isEmpty()) ? hebitPass : DEFAULT_HEBIT_PASS)
-                .apply();
+        saveCredentials(context, flowUser, flowPass);
     }
 
     /**
-     * Persists FLOW and HebitPro session cookies into SharedPreferences
+     * Persists FLOW session cookies into SharedPreferences
      */
     public static void persistCookies(Context context) {
         if (context == null) return;
@@ -127,13 +120,9 @@ public class WfmFlowAutomationManager {
             CookieManager cm = CookieManager.getInstance();
             cm.flush();
             String flowCookies = cm.getCookie("https://flow.telkomakses.co.id");
-            String hebitCookies = cm.getCookie("https://hebitpro-kaltara.ops.web.id");
             SharedPreferences.Editor editor = getPrefs(context).edit();
             if (flowCookies != null && !flowCookies.isEmpty()) {
                 editor.putString(KEY_FLOW_COOKIES, flowCookies);
-            }
-            if (hebitCookies != null && !hebitCookies.isEmpty()) {
-                editor.putString(KEY_HEBIT_COOKIES, hebitCookies);
             }
             editor.apply();
         } catch (Exception ignored) {
@@ -141,7 +130,7 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * Restores FLOW and HebitPro cookies from SharedPreferences into CookieManager
+     * Restores FLOW cookies from SharedPreferences into CookieManager
      */
     public static void restoreCookies(Context context) {
         if (context == null) return;
@@ -159,16 +148,6 @@ public class WfmFlowAutomationManager {
                     }
                 }
             }
-            String hebitCookies = prefs.getString(KEY_HEBIT_COOKIES, "");
-            if (!hebitCookies.isEmpty()) {
-                String[] parts = hebitCookies.split(";");
-                for (String p : parts) {
-                    String cookie = p.trim();
-                    if (!cookie.isEmpty()) {
-                        cm.setCookie("https://hebitpro-kaltara.ops.web.id", cookie + "; path=/; secure; samesite=lax");
-                    }
-                }
-            }
             cm.flush();
         } catch (Exception ignored) {
         }
@@ -183,7 +162,7 @@ public class WfmFlowAutomationManager {
                         BG_CHANNEL_NAME,
                         NotificationManager.IMPORTANCE_LOW
                 );
-                ch.setDescription("Notifikasi proses latar belakang pencarian WFM FLOW dan assign HebitPro");
+                ch.setDescription("Notifikasi proses latar belakang pencarian WFM FLOW");
                 ch.setShowBadge(false);
                 nm.createNotificationChannel(ch);
             }
@@ -224,7 +203,7 @@ public class WfmFlowAutomationManager {
     }
 
     /**
-     * Handles failure gracefully with specific attribution to either FLOW or HebitPro.
+     * Handles failure gracefully with specific attribution to FLOW Telkom Akses.
      */
     private static void handlePipelineFailure(Activity activity, String targetWeb, String detailMessage, Runnable cleanup) {
         if (activity == null || activity.isFinishing()) return;
@@ -301,18 +280,7 @@ public class WfmFlowAutomationManager {
                 btnDismiss.setOnClickListener(v -> dialog.dismiss());
                 btnRow.addView(btnDismiss);
 
-                if (targetWeb.contains("HebitPro")) {
-                    Button btnLogin = new Button(activity);
-                    btnLogin.setText("🔑 Buka Sesi HebitPro");
-                    btnLogin.setTextColor(Color.WHITE);
-                    btnLogin.setBackgroundColor(Color.parseColor("#002E7A"));
-                    btnLogin.setAllCaps(false);
-                    btnLogin.setOnClickListener(v -> {
-                        dialog.dismiss();
-                        openSessionHelperDialog(activity, HEBITPRO_TASK_ORDER_URL, "🔑 Sesi Login HebitPro Kaltara");
-                    });
-                    btnRow.addView(btnLogin);
-                } else if (targetWeb.contains("FLOW")) {
+                if (targetWeb.contains("FLOW")) {
                     Button btnLogin = new Button(activity);
                     btnLogin.setText("🔑 Buka Sesi FLOW");
                     btnLogin.setTextColor(Color.WHITE);
@@ -439,7 +407,7 @@ public class WfmFlowAutomationManager {
             String bookingDate = obj.optString("booking_date", "").trim();
             String assignedBy = obj.optString("assigned_by", "").trim();
 
-            runFullDispatchToFlowAndHebitPipeline(
+            runFullDispatchToFlowPipeline(
                     activity,
                     noSc,
                     wonum,
@@ -463,10 +431,10 @@ public class WfmFlowAutomationManager {
      * - Fast-loop polls every 350ms, auto-submits login, fast-overrides SweetAlert timers.
      * - Instantly shows native OTP dialog on screen when OTP is ready.
      * - Once OTP is entered, immediately continues to /workorder, filters, crops screenshot,
-     *   and auto-assigns in HebitPro in 4-6 seconds total!
+     *   saves to Gallery/Clipboard, and triggers task assigned notification!
      */
     @SuppressLint("SetJavaScriptEnabled")
-    public static void runFullDispatchToFlowAndHebitPipeline(
+    public static void runFullDispatchToFlowPipeline(
             Activity activity,
             String noSc,
             String initialWonum,
@@ -487,18 +455,16 @@ public class WfmFlowAutomationManager {
             SharedPreferences prefs = getPrefs(activity);
             String flowUser = prefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
             String flowPass = prefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
-            String hebitUser = prefs.getString(KEY_HEBIT_USER, DEFAULT_HEBIT_USER);
-            String hebitPass = prefs.getString(KEY_HEBIT_PASS, DEFAULT_HEBIT_PASS);
 
             String techDisplay = !leaderName.isEmpty()
                     ? (leaderName + (!leaderNik.isEmpty() ? " (" + leaderNik + ")" : ""))
                     : (!namaTim.isEmpty() ? namaTim : "Teknisi");
 
-            Toast.makeText(activity, "⚡ Memproses di background: FLOW WFM & HebitPro (" + noSc + ")", Toast.LENGTH_SHORT).show();
+            Toast.makeText(activity, "⚡ Memproses di background: FLOW WFM (" + noSc + ")", Toast.LENGTH_SHORT).show();
             updateProgressNotification(
                     activity,
                     "⚡ Dispatch Order: " + noSc,
-                    "[1/2] Membuka FLOW Telkom Akses → " + techDisplay,
+                    "Membuka FLOW Telkom Akses → " + techDisplay,
                     true
             );
 
@@ -558,13 +524,10 @@ public class WfmFlowAutomationManager {
             );
             bgWebView.layout(0, 0, bgWidth, bgHeight);
 
-            final int[] currentStage = {1}; // 1 = FLOW, 2 = HEBITPRO
             final boolean[] flowSsCaptured = {false};
-            final String[] capturedBase64Png = {""};
             final String[] resolvedWonum = {initialWonum != null ? initialWonum : ""};
             final boolean[] isFinished = {false};
             final boolean[] isWaitingForOtp = {false};
-            final boolean[] hebitLoopStarted = {false};
 
             final ViewGroup finalRoot = root;
             Runnable cleanup = () -> {
@@ -583,8 +546,8 @@ public class WfmFlowAutomationManager {
                 });
             };
 
-            Runnable captureFlowAndProceedToHebit = () -> {
-                if (flowSsCaptured[0] && currentStage[0] == 2) return;
+            Runnable onFlowWorkorderReady = () -> {
+                if (flowSsCaptured[0]) return;
                 flowSsCaptured[0] = true;
 
                 updateProgressNotification(
@@ -596,9 +559,6 @@ public class WfmFlowAutomationManager {
 
                 extractFlowCardAndCropBitmap(bgWebView, (croppedBitmap, extractedJson) -> {
                     if (croppedBitmap != null) {
-                        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                        croppedBitmap.compress(Bitmap.CompressFormat.PNG, 92, bos);
-                        capturedBase64Png[0] = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
                         saveBitmapToGalleryAndClipboard(activity, croppedBitmap, noSc);
                     }
 
@@ -636,14 +596,10 @@ public class WfmFlowAutomationManager {
                             !assignedBy.isEmpty() ? assignedBy : "AHMAD PAIDI"
                     );
 
-                    currentStage[0] = 2;
-                    updateProgressNotification(
-                            activity,
-                            "⚡ Dispatch Order: " + noSc,
-                            "[2/2] Membuka HebitPro (/task-order) untuk Assign ke " + techDisplay + "...",
-                            true
-                    );
-                    bgWebView.loadUrl(HEBITPRO_TASK_ORDER_URL);
+                    persistCookies(activity);
+                    cancelProgressNotification(activity);
+                    Toast.makeText(activity, "✅ Order " + noSc + " berhasil diproses & SS WFM disimpan ke Galeri!", Toast.LENGTH_LONG).show();
+                    mainHandler.postDelayed(cleanup, 1200);
                 });
             };
 
@@ -657,7 +613,7 @@ public class WfmFlowAutomationManager {
                 public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
                     super.onReceivedError(view, errorCode, description, failingUrl);
                     if (failingUrl == null || failingUrl.equals("about:blank") || isFinished[0]) return;
-                    String targetWeb = failingUrl.contains("flow.telkomakses") ? "FLOW Telkom Akses" : (failingUrl.contains("hebitpro") ? "HebitPro Kaltara" : "Web Server");
+                    String targetWeb = failingUrl.contains("flow.telkomakses") ? "FLOW Telkom Akses" : "Web Server";
                     handlePipelineFailure(activity, targetWeb, "Koneksi ke " + targetWeb + " terputus: " + description + " (Kode " + errorCode + "). Periksa jaringan Anda.", cleanup);
                 }
 
@@ -669,38 +625,6 @@ public class WfmFlowAutomationManager {
 
                     if (url.contains("flow.telkomakses.co.id")) {
                         injectDesktopViewport(view);
-                    } else if (url.contains("hebitpro-kaltara.ops.web.id")) {
-                        injectDesktopViewport(view);
-                        if (url.contains("/login")) {
-                            handlePipelineFailure(
-                                    activity,
-                                    "HebitPro Kaltara",
-                                    "Sesi login HebitPro belum aktif atau sudah kadaluarsa (Perlu verifikasi captcha). Silakan klik [Buka Sesi HebitPro] untuk login sekali.",
-                                    cleanup
-                            );
-                        } else if (!url.contains("/task-order")) {
-                            view.loadUrl(HEBITPRO_TASK_ORDER_URL);
-                        } else {
-                            if (!hebitLoopStarted[0]) {
-                                hebitLoopStarted[0] = true;
-                                runHebitProTaskOrderLoop(
-                                        view,
-                                        isFinished,
-                                        activity,
-                                        noSc,
-                                        resolvedWonum[0],
-                                        leaderNik,
-                                        leaderName,
-                                        namaTim,
-                                        odp,
-                                        paket,
-                                        koordinat,
-                                        capturedBase64Png[0],
-                                        cleanup,
-                                        0
-                                );
-                            }
-                        }
                     }
                 }
             });
@@ -716,11 +640,31 @@ public class WfmFlowAutomationManager {
                     flowSsCaptured,
                     isWaitingForOtp,
                     activity,
-                    captureFlowAndProceedToHebit,
+                    onFlowWorkorderReady,
                     cleanup,
                     0
             );
         });
+    }
+
+    public static void runFullDispatchToFlowAndHebitPipeline(
+            Activity activity,
+            String noSc,
+            String initialWonum,
+            String serviceArea,
+            String namaTim,
+            String leaderNik,
+            String leaderName,
+            String paket,
+            String odp,
+            String koordinat,
+            String bookingDate,
+            String assignedBy
+    ) {
+        runFullDispatchToFlowPipeline(
+                activity, noSc, initialWonum, serviceArea, namaTim, leaderNik, leaderName,
+                paket, odp, koordinat, bookingDate, assignedBy
+        );
     }
 
     /**
@@ -1133,442 +1077,6 @@ public class WfmFlowAutomationManager {
         });
     }
 
-    /**
-     * STAGE 3 LOOP (FAST BACKGROUND POLLING EVERY 450MS):
-     */
-    private static void runHebitProTaskOrderLoop(
-            WebView view,
-            boolean[] isFinished,
-            Activity activity,
-            String noSc,
-            String wonum,
-            String leaderNik,
-            String leaderName,
-            String namaTim,
-            String odp,
-            String paket,
-            String koordinat,
-            String base64Png,
-            Runnable cleanup,
-            int attempt
-    ) {
-        if (isFinished[0] || attempt > 110) {
-            if (attempt > 110 && !isFinished[0]) {
-                handlePipelineFailure(
-                        activity,
-                        "HebitPro Kaltara",
-                        "Waktu habis (Timeout) saat mencari order " + noSc + " atau membuka form assign di HebitPro Kaltara.",
-                        cleanup
-                );
-            }
-            return;
-        }
-        mainHandler.postDelayed(() -> {
-            if (isFinished[0]) return;
-            injectHebitProTaskOrderAutomation(
-                    view,
-                    noSc,
-                    wonum,
-                    leaderNik,
-                    leaderName,
-                    namaTim,
-                    odp,
-                    paket,
-                    koordinat,
-                    base64Png,
-                    statusResult -> {
-                        if (statusResult != null && statusResult.contains("DONE_SUBMITTED")) {
-                            isFinished[0] = true;
-                            persistCookies(activity);
-                            cancelProgressNotification(activity);
-                            Toast.makeText(activity, "✅ Order " + noSc + " berhasil di-assign & dikirim ke Telegram Teknisi!", Toast.LENGTH_LONG).show();
-                            mainHandler.postDelayed(cleanup, 1200);
-                        } else if (statusResult != null && statusResult.startsWith("SUBMIT_ERROR:")) {
-                            String err = statusResult.replace("SUBMIT_ERROR:", "").trim();
-                            handlePipelineFailure(activity, "HebitPro Kaltara", "Validasi form HebitPro gagal: " + err, cleanup);
-                        } else {
-                            if (statusResult != null && statusResult.contains("SEARCHED_TABLE")) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [2/2] Mencari order di tabel HebitPro...", true);
-                            } else if (statusResult != null && statusResult.contains("CLICKED_TO_TEKNISI")) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✈️ [2/2] Klik [To Teknisi] → Membuka form Assign...", true);
-                            } else if (statusResult != null && statusResult.contains("SWAL_CONFIRMED")) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📋 [2/2] Konfirmasi Data Baru → Membuka Form Assign...", true);
-                            } else if (statusResult != null && (statusResult.contains("MODAL_SELECTING_TECH") || statusResult.contains("MODAL_SELECT2"))) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📋 [2/2] Memilih Teknisi: " + leaderName + " (" + leaderNik + ")...", true);
-                            } else if (statusResult != null && statusResult.contains("MODAL_SS_PASTED")) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🖼️ [2/2] Menempelkan Screenshot WFM...", true);
-                            } else if (statusResult != null && (statusResult.contains("CLICKED_SIMPAN_ASSIGN") || statusResult.contains("WAITING_POST_SAVE"))) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "💾 [2/2] Menyimpan Assign & Mengirim ke Telegram...", true);
-                            } else if (statusResult != null && statusResult.contains("MODAL_OPEN")) {
-                                updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📝 [2/2] Mengisi form Assign Order...", true);
-                            }
-                            runHebitProTaskOrderLoop(
-                                    view,
-                                    isFinished,
-                                    activity,
-                                    noSc,
-                                    wonum,
-                                    leaderNik,
-                                    leaderName,
-                                    namaTim,
-                                    odp,
-                                    paket,
-                                    koordinat,
-                                    base64Png,
-                                    cleanup,
-                                    attempt + 1
-                            );
-                        }
-                    }
-            );
-        }, 450);
-    }
-
-    private interface StringCallback {
-        void onResult(String val);
-    }
-
-    private static void injectHebitProTaskOrderAutomation(
-            WebView view,
-            String noSc,
-            String wonum,
-            String leaderNik,
-            String leaderName,
-            String namaTim,
-            String odp,
-            String paket,
-            String koordinat,
-            String base64Png,
-            StringCallback callback
-    ) {
-        String lat = "";
-        String lng = "";
-        if (koordinat != null && koordinat.contains(",")) {
-            String[] parts = koordinat.split(",", 2);
-            lat = parts[0].trim();
-            lng = parts[1].trim();
-        }
-
-        String safeSc = escapeJs(noSc);
-        String safeWo = escapeJs(wonum);
-        String safeNik = escapeJs(leaderNik);
-        String safeName = escapeJs(leaderName);
-        String safeTim = escapeJs(namaTim);
-        String safeOdp = escapeJs("-".equals(odp) ? "" : odp);
-        String safePaket = escapeJs("-".equals(paket) ? "" : paket);
-        String safeLat = escapeJs(lat);
-        String safeLng = escapeJs(lng);
-        String safeB64 = base64Png != null ? base64Png : "";
-
-        String js = "(function(){" +
-                "var noSc = '" + safeSc + "';" +
-                "var wonum = '" + safeWo + "';" +
-                "var nik = '" + safeNik + "';" +
-                "var techName = '" + safeName + "';" +
-                "var timName = '" + safeTim + "';" +
-                "var odpVal = '" + safeOdp + "';" +
-                "var paketVal = '" + safePaket + "';" +
-                "var latVal = '" + safeLat + "';" +
-                "var lngVal = '" + safeLng + "';" +
-                "var b64Png = '" + safeB64 + "';" +
-
-                "if(window.__adingHebitFormSubmitted){" +
-                "  var errAlert = document.querySelector('.alert-danger, .swal2-error, .text-danger, .invalid-feedback');" +
-                "  if(errAlert && errAlert.offsetWidth > 0 && (errAlert.innerText || '').trim().length > 3){" +
-                "    return 'SUBMIT_ERROR:' + errAlert.innerText.trim();" +
-                "  }" +
-                "  var swalSucc = document.querySelector('.swal2-success, .alert-success');" +
-                "  if(swalSucc && swalSucc.offsetWidth > 0){" +
-                "    return 'DONE_SUBMITTED';" +
-                "  }" +
-                "  if(window.__adingHebitSaveTime && (Date.now() - window.__adingHebitSaveTime) < 3000){" +
-                "    return 'WAITING_POST_SAVE';" +
-                "  }" +
-                "  return 'DONE_SUBMITTED';" +
-                "}" +
-
-                "if(window.Swal && typeof window.Swal.isVisible === 'function' && window.Swal.isVisible()){" +
-                "  if(typeof window.Swal.clickConfirm === 'function'){" +
-                "    window.Swal.clickConfirm();" +
-                "    return 'SWAL_CONFIRMED';" +
-                "  }" +
-                "}" +
-                "var swalConfirm = null;" +
-                "var popups = document.querySelectorAll('.swal2-popup, .swal2-container, .sweet-alert');" +
-                "for(var p=0; p<popups.length; p++){" +
-                "  var pBtns = popups[p].querySelectorAll('button, a, .swal2-confirm');" +
-                "  for(var pb=0; pb<pBtns.length; pb++){" +
-                "    var pbt = (pBtns[pb].innerText || pBtns[pb].textContent || '').trim().toLowerCase();" +
-                "    if(pbt === 'assign' || pbt === 'ya' || pbt.indexOf('lanjut') !== -1 || pbt === 'ok' || pBtns[pb].classList.contains('swal2-confirm')){" +
-                "      swalConfirm = pBtns[pb]; break;" +
-                "    }" +
-                "  }" +
-                "  if(swalConfirm) break;" +
-                "}" +
-                "if(!swalConfirm){" +
-                "  swalConfirm = document.querySelector('.swal2-popup button.swal2-confirm, .swal2-container button.swal2-confirm, button.swal2-confirm, .swal-button--confirm');" +
-                "}" +
-                "if(swalConfirm){" +
-                "  swalConfirm.click();" +
-                "  swalConfirm.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));" +
-                "  return 'SWAL_CONFIRMED';" +
-                "}" +
-
-                "function isVisibleModal(el){" +
-                "  if(!el) return false;" +
-                "  if(el.classList && (el.classList.contains('swal2-popup') || el.classList.contains('swal2-container') || el.classList.contains('sweet-alert'))) return false;" +
-                "  var style = window.getComputedStyle ? window.getComputedStyle(el) : el.style;" +
-                "  if(style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;" +
-                "  var hasClass = el.classList && (el.classList.contains('show') || el.classList.contains('in'));" +
-                "  var hasDisplay = el.style && el.style.display && el.style.display.indexOf('block') !== -1;" +
-                "  var hasDim = (el.offsetWidth > 0 && el.offsetHeight > 0);" +
-                "  return (hasClass || hasDisplay || hasDim);" +
-                "}" +
-
-                "var assignModal = null;" +
-                "var modals = document.querySelectorAll('.modal.show, .modal[style*=\"display: block\"], .modal.in, .modal');" +
-                "for(var m=0; m<modals.length; m++){" +
-                "  if(!isVisibleModal(modals[m])) continue;" +
-                "  var mTxt = modals[m].innerText || '';" +
-                "  if(mTxt.indexOf('Assign Order') !== -1 || mTxt.indexOf('Pilih Teknisi') !== -1 || mTxt.indexOf('Nama ODP') !== -1){" +
-                "    assignModal = modals[m].closest('.modal') || modals[m]; break;" +
-                "  }" +
-                "}" +
-                "if(assignModal){" +
-                "  function fillInputByPlaceholderOrLabel(scope, phSubstr, lblSubstr, val){" +
-                "    if(!val) return;" +
-                "    var inp = scope.querySelector('input[placeholder*=\"' + phSubstr + '\" i], textarea[placeholder*=\"' + phSubstr + '\" i]');" +
-                "    if(!inp && lblSubstr){" +
-                "      var lbls = scope.querySelectorAll('label');" +
-                "      for(var i=0; i<lbls.length; i++){" +
-                "        if((lbls[i].innerText || '').toLowerCase().indexOf(lblSubstr.toLowerCase()) !== -1){" +
-                "          inp = lbls[i].parentElement.querySelector('input, textarea');" +
-                "          if(inp) break;" +
-                "        }" +
-                "      }" +
-                "    }" +
-                "    if(inp && !inp.value){" +
-                "      inp.value = val;" +
-                "      inp.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "      inp.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "    }" +
-                "  }" +
-                "  fillInputByPlaceholderOrLabel(assignModal, 'ODP', 'Nama ODP', odpVal);" +
-                "  fillInputByPlaceholderOrLabel(assignModal, 'IndiHome', 'Paket', paketVal);" +
-                "  fillInputByPlaceholderOrLabel(assignModal, '-6.', 'Latitude', latVal);" +
-                "  fillInputByPlaceholderOrLabel(assignModal, '106.', 'Longitude', lngVal);" +
-
-                "  var cleanLeader = techName || (timName ? timName.split('(')[0].trim() : '');" +
-                "  var searchTerm = (nik || cleanLeader || '').trim();" +
-                "  var techSelected = false;" +
-                "  var sel = assignModal.querySelector('select');" +
-                "  if(sel){" +
-                "    if(sel.value && sel.value !== '' && sel.value !== '0'){" +
-                "      techSelected = true;" +
-                "    }" +
-                "    if(!techSelected){" +
-                "      var opts = sel.querySelectorAll('option');" +
-                "      for(var o=0; o<opts.length; o++){" +
-                "        var oTxt = (opts[o].innerText || opts[o].textContent || '').toLowerCase();" +
-                "        var oVal = (opts[o].value || '').toLowerCase();" +
-                "        var mOpt = (nik && (oTxt.indexOf(nik.toLowerCase()) !== -1 || oVal.indexOf(nik.toLowerCase()) !== -1)) ||" +
-                "                   (cleanLeader && oTxt.indexOf(cleanLeader.toLowerCase()) !== -1) ||" +
-                "                   (timName && oTxt.indexOf(timName.toLowerCase()) !== -1);" +
-                "        if(mOpt && opts[o].value){" +
-                "          opts[o].selected = true;" +
-                "          sel.value = opts[o].value;" +
-                "          sel.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "          if(window.jQuery){ try{ window.jQuery(sel).val(opts[o].value).trigger('change'); }catch(e){} }" +
-                "          techSelected = true;" +
-                "          break;" +
-                "        }" +
-                "      }" +
-                "    }" +
-                "    if(!techSelected && window.jQuery){" +
-                "      try {" +
-                "        var sField = document.querySelector('.select2-container--open .select2-search__field, .select2-search--dropdown .select2-search__field');" +
-                "        if(!sField){" +
-                "          window.jQuery(sel).select2('open');" +
-                "          return 'MODAL_SELECT2_OPENING';" +
-                "        } else {" +
-                "          if(!assignModal.dataset.adingTechTyped){" +
-                "            assignModal.dataset.adingTechTyped = '1';" +
-                "            sField.value = searchTerm;" +
-                "            sField.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "            sField.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));" +
-                "            window.jQuery(sField).val(searchTerm).trigger('input').trigger('keyup').trigger('change');" +
-                "            return 'MODAL_SELECT2_SEARCHING';" +
-                "          } else {" +
-                "            var sRes = document.querySelectorAll('.select2-results__option, li.select2-results__option');" +
-                "            for(var sr=0; sr<sRes.length; sr++){" +
-                "              var srTxt = (sRes[sr].innerText || sRes[sr].textContent || '').toLowerCase();" +
-                "              var srMatch = (nik && srTxt.indexOf(nik.toLowerCase()) !== -1) ||" +
-                "                            (cleanLeader && srTxt.indexOf(cleanLeader.toLowerCase()) !== -1) ||" +
-                "                            (timName && srTxt.indexOf(timName.toLowerCase()) !== -1);" +
-                "              if(srMatch){" +
-                "                sRes[sr].click();" +
-                "                sRes[sr].dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));" +
-                "                techSelected = true;" +
-                "                break;" +
-                "              }" +
-                "            }" +
-                "            if(!techSelected && sRes.length === 1){" +
-                "              var singleSr = (sRes[0].innerText || '').toLowerCase();" +
-                "              if(singleSr.indexOf('search') === -1 && singleSr.indexOf('tidak') === -1 && singleSr.indexOf('no result') === -1 && singleSr.length > 2){" +
-                "                sRes[0].click();" +
-                "                sRes[0].dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));" +
-                "                techSelected = true;" +
-                "              }" +
-                "            }" +
-                "          }" +
-                "        }" +
-                "      } catch(e){}" +
-                "    }" +
-                "  }" +
-                "  var techInput = assignModal.querySelector('input[placeholder*=\"Ketik NIK\" i], input[placeholder*=\"Nama Teknisi\" i]');" +
-                "  if(techInput && !techInput.value && searchTerm){" +
-                "    techInput.focus();" +
-                "    techInput.value = searchTerm;" +
-                "    techInput.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "    techInput.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "    techSelected = true;" +
-                "  }" +
-                "" +
-                "  var isTechReady = techSelected || (sel && sel.value && sel.value !== '' && sel.value !== '0');" +
-                "" +
-                "  if(b64Png && !assignModal.dataset.adingSsPasted){" +
-                "    assignModal.dataset.adingSsPasted = '1';" +
-                "    try {" +
-                "      var bStr = atob(b64Png);" +
-                "      var ab = new ArrayBuffer(bStr.length);" +
-                "      var ia = new Uint8Array(ab);" +
-                "      for(var i=0; i<bStr.length; i++){ ia[i] = bStr.charCodeAt(i); }" +
-                "      var blob = new Blob([ab], {type:'image/png'});" +
-                "      var file = new File([blob], 'ss_wfm_' + noSc + '.png', {type:'image/png', lastModified:Date.now()});" +
-                "      var dt = new DataTransfer();" +
-                "      dt.items.add(file);" +
-                "" +
-                "      var ssBox = assignModal.querySelector('textarea[placeholder*=\"Paste screenshot\" i], [placeholder*=\"Paste screenshot\" i], textarea');" +
-                "      if(ssBox){" +
-                "        ssBox.focus();" +
-                "        ssBox.click();" +
-                "        var pasteEvt = new ClipboardEvent('paste', {bubbles:true, cancelable:true, clipboardData:dt});" +
-                "        ssBox.dispatchEvent(pasteEvt);" +
-                "        window.dispatchEvent(pasteEvt);" +
-                "        document.dispatchEvent(pasteEvt);" +
-                "      }" +
-                "      var fileInputs = assignModal.querySelectorAll('input[type=\"file\"]');" +
-                "      for(var fi=0; fi<fileInputs.length; fi++){" +
-                "        try {" +
-                "          fileInputs[fi].files = dt.files;" +
-                "          fileInputs[fi].dispatchEvent(new Event('change', {bubbles:true}));" +
-                "        } catch(e){}" +
-                "      }" +
-                "      var hiddenB64 = assignModal.querySelectorAll('input[type=\"hidden\"], textarea');" +
-                "      for(var hi=0; hi<hiddenB64.length; hi++){" +
-                "        var hn = (hiddenB64[hi].name || hiddenB64[hi].id || '').toLowerCase();" +
-                "        if(hn.indexOf('ss') !== -1 || hn.indexOf('screenshot') !== -1 || hn.indexOf('foto') !== -1 || hn.indexOf('image') !== -1){" +
-                "          if(!hiddenB64[hi].value){" +
-                "            hiddenB64[hi].value = 'data:image/png;base64,' + b64Png;" +
-                "            hiddenB64[hi].dispatchEvent(new Event('input', {bubbles:true}));" +
-                "            hiddenB64[hi].dispatchEvent(new Event('change', {bubbles:true}));" +
-                "          }" +
-                "        }" +
-                "      }" +
-                "    } catch(e){}" +
-                "    return 'MODAL_SS_PASTED';" +
-                "  }" +
-                "" +
-                "  if(!isTechReady){" +
-                "    return 'MODAL_SELECTING_TECH';" +
-                "  }" +
-                "" +
-                "  if(isTechReady && !assignModal.dataset.adingSaveClicked){" +
-                "    var modalBtns = assignModal.querySelectorAll('button, input[type=\"submit\"]');" +
-                "    for(var mb=0; mb<modalBtns.length; mb++){" +
-                "      var mbTxt = (modalBtns[mb].innerText || modalBtns[mb].value || '').toLowerCase();" +
-                "      if(mbTxt.indexOf('simpan & assign') !== -1 || mbTxt.indexOf('simpan') !== -1){" +
-                "        assignModal.dataset.adingSaveClicked = '1';" +
-                "        window.__adingHebitFormSubmitted = true;" +
-                "        window.__adingHebitSaveTime = Date.now();" +
-                "        modalBtns[mb].click();" +
-                "        modalBtns[mb].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));" +
-                "        if(window.jQuery){ try{ window.jQuery(modalBtns[mb]).trigger('click'); }catch(e){} }" +
-                "        return 'CLICKED_SIMPAN_ASSIGN';" +
-                "      }" +
-                "    }" +
-                "  }" +
-                "  return 'MODAL_OPEN';" +
-                "}" +
-
-                "var searchTarget = (noSc || wonum || '').trim();" +
-                "if(searchTarget && window.__adingHebitSearched !== searchTarget){" +
-                "  var didSearch = false;" +
-                "  if(window.jQuery && window.jQuery.fn && window.jQuery.fn.dataTable){" +
-                "    try {" +
-                "      var dtApi = window.jQuery.fn.dataTable.tables({api:true});" +
-                "      if(dtApi && dtApi.search){ dtApi.search(searchTarget).draw(); didSearch = true; }" +
-                "    } catch(e){}" +
-                "  }" +
-                "  var sInp = document.querySelector('input[type=\"search\"], .dataTables_filter input, #search, [name=\"search\"]');" +
-                "  if(sInp){" +
-                "    sInp.value = searchTarget;" +
-                "    sInp.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "    sInp.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "    sInp.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', keyCode:13, bubbles:true}));" +
-                "    didSearch = true;" +
-                "  }" +
-                "  if(didSearch){" +
-                "    window.__adingHebitSearched = searchTarget;" +
-                "    return 'SEARCHED_TABLE';" +
-                "  }" +
-                "}" +
-
-                "if(window.__adingToTeknisiClickTime && (Date.now() - window.__adingToTeknisiClickTime) > 3500){" +
-                "  var oldClicked = document.querySelectorAll('[data-ading-to-teknisi-clicked]');" +
-                "  for(var oc=0; oc<oldClicked.length; oc++){ delete oldClicked[oc].dataset.adingToTeknisiClicked; }" +
-                "  delete window.__adingToTeknisiClickTime;" +
-                "}" +
-
-                "var scSub = noSc && noSc.length > 14 ? noSc.substring(0, 15).toLowerCase() : (noSc || '').toLowerCase();" +
-                "var cleanWo = wonum ? wonum.replace(/^WO/i, 'W0').toLowerCase() : '';" +
-                "var rawWo = wonum ? wonum.toLowerCase() : '';" +
-
-                "var rows = document.querySelectorAll('table tbody tr');" +
-                "for(var r=0; r<rows.length; r++){" +
-                "  var rTxt = (rows[r].innerText || '').toLowerCase();" +
-                "  var matchSc = (noSc && rTxt.indexOf(noSc.toLowerCase()) !== -1) || (scSub && rTxt.indexOf(scSub) !== -1);" +
-                "  var matchWo = (rawWo && rTxt.indexOf(rawWo) !== -1) || (cleanWo && rTxt.indexOf(cleanWo) !== -1);" +
-                "  var singleMatch = (rows.length === 1 && rTxt.indexOf('no data') === -1 && rTxt.indexOf('tidak') === -1 && rTxt.indexOf('loading') === -1 && rTxt.trim().length > 10);" +
-                "  if(matchSc || matchWo || singleMatch){" +
-                "    var rowBtns = rows[r].querySelectorAll('button, a, [role=\"button\"], .btn');" +
-                "    for(var b=0; b<rowBtns.length; b++){" +
-                "      var bTxt = (rowBtns[b].innerText || rowBtns[b].title || '').toLowerCase().replace(/\\s+/g, ' ');" +
-                "      var hasTelegramIcon = rowBtns[b].querySelector('.fa-telegram, .fa-telegram-plane, .fa-paper-plane, .bi-send, .bi-telegram') !== null;" +
-                "      if(bTxt.indexOf('teknisi') !== -1 || bTxt.indexOf('assign') !== -1 || (bTxt.indexOf('to') !== -1 && bTxt.indexOf('teknisi') !== -1) || hasTelegramIcon){" +
-                "        if(!rowBtns[b].dataset.adingToTeknisiClicked){" +
-                "          rowBtns[b].dataset.adingToTeknisiClicked = '1';" +
-                "          window.__adingToTeknisiClickTime = Date.now();" +
-                "          rowBtns[b].click();" +
-                "          rowBtns[b].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));" +
-                "          if(window.jQuery){ try{ window.jQuery(rowBtns[b]).trigger('click'); }catch(e){} }" +
-                "          return 'CLICKED_TO_TEKNISI';" +
-                "        }" +
-                "      }" +
-                "    }" +
-                "  }" +
-                "}" +
-                "return 'WAITING_TABLE';" +
-                "})();";
-
-        view.evaluateJavascript(js, rawResult -> {
-            String res = rawResult != null ? rawResult.replace("\"", "") : "";
-            if (callback != null) {
-                callback.onResult(res);
-            }
-        });
-    }
-
     private interface FlowExtractionCallback {
         void onExtracted(Bitmap croppedBitmap, JSONObject extractedData);
     }
@@ -1708,26 +1216,6 @@ public class WfmFlowAutomationManager {
         return null;
     }
 
-    private static void injectHebitAutoLoginScript(WebView webView, String username, String password) {
-        String safeUser = escapeJs(username);
-        String safePass = escapeJs(password);
-        String js = "(function(){" +
-                "var userInput = document.getElementById('username') || document.querySelector('input[name=\"username\"]');" +
-                "var passInput = document.getElementById('password') || document.querySelector('input[name=\"password\"]');" +
-                "if(!userInput || !passInput || passInput.dataset.adingFilled) return;" +
-                "passInput.dataset.adingFilled = '1';" +
-                "userInput.value = '" + safeUser + "';" +
-                "userInput.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "userInput.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "passInput.value = '" + safePass + "';" +
-                "passInput.dispatchEvent(new Event('input', {bubbles:true}));" +
-                "passInput.dispatchEvent(new Event('change', {bubbles:true}));" +
-                "var rem = document.getElementById('remember');" +
-                "if(rem && !rem.checked){ rem.checked = true; }" +
-                "})();";
-        webView.evaluateJavascript(js, null);
-    }
-
     private static void injectDesktopViewport(WebView webView) {
         String js = "(function(){" +
                 "var meta = document.querySelector('meta[name=\"viewport\"]');" +
@@ -1749,14 +1237,14 @@ public class WfmFlowAutomationManager {
             scrollView.addView(container);
 
             TextView tvTitle = new TextView(activity);
-            tvTitle.setText("⚡ Pengaturan Akun FLOW & HebitPro");
+            tvTitle.setText("⚡ Pengaturan Akun WFM FLOW");
             tvTitle.setTextSize(17f);
             tvTitle.setTypeface(null, Typeface.BOLD);
             tvTitle.setTextColor(Color.parseColor("#F9010F"));
             container.addView(tvTitle);
 
             TextView tvSub = new TextView(activity);
-            tvSub.setText("Otomasi berjalan sepenuhnya di latar belakang saat Anda klik tombol [Dispatch] di ADING.");
+            tvSub.setText("Otomasi WFM FLOW berjalan di latar belakang saat Anda klik tombol [Dispatch] di ADING.");
             tvSub.setTextSize(12f);
             tvSub.setTextColor(Color.parseColor("#4B5563"));
             tvSub.setPadding(0, dp(activity, 4), 0, dp(activity, 12));
@@ -1765,28 +1253,18 @@ public class WfmFlowAutomationManager {
             LinearLayout navRow = new LinearLayout(activity);
             navRow.setOrientation(LinearLayout.HORIZONTAL);
             Button btnLoginFlow = createSmallButton(activity, "🔑 Buka Sesi FLOW", "#111827");
-            Button btnLoginHebit = createSmallButton(activity, "🔑 Buka Sesi HebitPro", "#002E7A");
-            navRow.addView(btnLoginFlow, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            navRow.addView(btnLoginHebit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            navRow.addView(btnLoginFlow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             container.addView(navRow);
 
-            addSectionHeader(container, activity, "🧪 Test Manual Cari SC di FLOW & Assign HebitPro");
+            addSectionHeader(container, activity, "🧪 Test Manual Cari SC di FLOW");
             EditText etNoSc = createInput(activity, "NO SC (contoh: AOi4261112044318992845c20)", "", false);
-            EditText etTeknisiNik = createInput(activity, "NIK / Nama Teknisi (contoh: 16983839 / ARIFIN)", "", false);
             container.addView(etNoSc);
-            container.addView(etTeknisiNik);
 
             addSectionHeader(container, activity, "🔐 Akun FLOW (flow.telkomakses.co.id)");
             EditText etFlowUser = createInput(activity, "Username FLOW", prefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER), false);
             EditText etFlowPass = createInput(activity, "Password FLOW", prefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS), true);
             container.addView(etFlowUser);
             container.addView(etFlowPass);
-
-            addSectionHeader(container, activity, "🔐 Akun HebitPro (hebitpro-kaltara.ops.web.id)");
-            EditText etHebitUser = createInput(activity, "Username HebitPro", prefs.getString(KEY_HEBIT_USER, DEFAULT_HEBIT_USER), false);
-            EditText etHebitPass = createInput(activity, "Password HebitPro", prefs.getString(KEY_HEBIT_PASS, DEFAULT_HEBIT_PASS), true);
-            container.addView(etHebitUser);
-            container.addView(etHebitPass);
 
             AlertDialog dialog = new AlertDialog.Builder(activity)
                     .setView(scrollView)
@@ -1796,40 +1274,33 @@ public class WfmFlowAutomationManager {
                     .create();
 
             btnLoginFlow.setOnClickListener(v -> {
-                saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString(), etHebitUser.getText().toString(), etHebitPass.getText().toString());
+                saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
                 dialog.dismiss();
                 openSessionHelperDialog(activity, FLOW_WORKORDER_URL, "🔑 Sesi Login FLOW Telkom Akses");
             });
 
-            btnLoginHebit.setOnClickListener(v -> {
-                saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString(), etHebitUser.getText().toString(), etHebitPass.getText().toString());
-                dialog.dismiss();
-                openSessionHelperDialog(activity, HEBITPRO_TASK_ORDER_URL, "🔑 Sesi Login HebitPro Kaltara");
-            });
-
             dialog.setOnShowListener(dlg -> {
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-                    saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString(), etHebitUser.getText().toString(), etHebitPass.getText().toString());
-                    Toast.makeText(activity, "Kredensial FLOW & HebitPro disimpan!", Toast.LENGTH_SHORT).show();
+                    saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
+                    Toast.makeText(activity, "Kredensial FLOW disimpan!", Toast.LENGTH_SHORT).show();
                 });
 
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                    saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString(), etHebitUser.getText().toString(), etHebitPass.getText().toString());
+                    saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
                     String sc = etNoSc.getText().toString().trim();
                     if (sc.isEmpty()) {
                         Toast.makeText(activity, "Masukkan NO SC terlebih dahulu!", Toast.LENGTH_SHORT).show();
                         return;
                     }
-                    String tech = etTeknisiNik.getText().toString().trim();
                     dialog.dismiss();
-                    runFullDispatchToFlowAndHebitPipeline(
+                    runFullDispatchToFlowPipeline(
                             activity,
                             sc,
                             "",
                             "",
-                            tech,
-                            tech,
-                            tech,
+                            "",
+                            "",
+                            "",
                             "",
                             "",
                             "",
@@ -1847,12 +1318,6 @@ public class WfmFlowAutomationManager {
     public static void openSessionHelperDialog(Activity activity, String targetUrl, String title) {
         if (activity == null || activity.isFinishing()) return;
         restoreCookies(activity);
-
-        SharedPreferences prefs = getPrefs(activity);
-        String flowUser = prefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
-        String flowPass = prefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
-        String hebitUser = prefs.getString(KEY_HEBIT_USER, DEFAULT_HEBIT_USER);
-        String hebitPass = prefs.getString(KEY_HEBIT_PASS, DEFAULT_HEBIT_PASS);
 
         Dialog dlg = new Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -1907,8 +1372,6 @@ public class WfmFlowAutomationManager {
                     if (url.contains("/unauthorize")) {
                         view.loadUrl(FLOW_LOGIN_URL);
                     }
-                } else if (url.contains("hebitpro-kaltara.ops.web.id")) {
-                    injectHebitAutoLoginScript(view, hebitUser, hebitPass);
                 }
             }
         });

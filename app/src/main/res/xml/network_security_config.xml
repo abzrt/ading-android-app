@@ -10,7 +10,6 @@
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">ading.web.id</domain>
         <domain includeSubdomains="true">flow.telkomakses.co.id</domain>
-        <domain includeSubdomains="true">hebitpro-kaltara.ops.web.id</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

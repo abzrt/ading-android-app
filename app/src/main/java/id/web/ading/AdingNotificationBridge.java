@@ -235,12 +235,17 @@ public class AdingNotificationBridge {
     }
 
     @JavascriptInterface
-    public void openWfmHebitPanel() {
+    public void openWfmPanel() {
         Activity act = sActivityRef != null ? sActivityRef.get() : null;
         WebView wv = sWebViewRef != null ? sWebViewRef.get() : null;
         if (act != null) {
             WfmFlowAutomationManager.showControlPanelDialog(act, wv);
         }
+    }
+
+    @JavascriptInterface
+    public void openWfmHebitPanel() {
+        openWfmPanel();
     }
 
     public static void injectWebNotificationHook(WebView view) {
