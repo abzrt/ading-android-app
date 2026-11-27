@@ -2,10 +2,23 @@
 window.addEventListener("message", (event) => {
   if (event.source !== window || !event.data || event.data.source !== "ADING_EXT_HOOK") return;
   if (event.data.type === "ADING_DISPATCH_TRIGGERED" && event.data.payload) {
-    chrome.runtime.sendMessage({
-      type: "ADING_DISPATCH_TRIGGERED",
-      payload: event.data.payload,
-    });
+    try {
+      if (!chrome.runtime || !chrome.runtime.id) {
+        showAdingToast("Refresh Halaman ADING", "Extension baru saja di-reload. Tekan F5 di tab ADING lalu coba Dispatch lagi.", "info");
+        return;
+      }
+      chrome.runtime.sendMessage(
+        {
+          type: "ADING_DISPATCH_TRIGGERED",
+          payload: event.data.payload,
+        },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    } catch (_) {
+      showAdingToast("Refresh Halaman ADING", "Extension baru saja di-reload. Tekan F5 di tab ADING lalu coba Dispatch lagi.", "info");
+    }
   }
 });
 
