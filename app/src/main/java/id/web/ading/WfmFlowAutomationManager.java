@@ -858,8 +858,8 @@ public class WfmFlowAutomationManager {
                     "  return 'READY_FOR_OTP';" +
                     "}" +
 
-                    // 4. CHECK IF LOGIN WAS SUBMITTED & USERNAME SET (ONLY ON LOGIN PAGE & NO MENUS YET) -> JUMP TO /otp
-                    "if((path === '/' || path === '/login') && localStorage.getItem('username') && !localStorage.getItem('menus')){" +
+                    // 4. CHECK IF LOGIN WAS JUST SUBMITTED & USERNAME SET -> JUMP TO /otp
+                    "if(window.__adingLoginSubmitted && (path === '/' || path === '/login') && localStorage.getItem('username') && !localStorage.getItem('menus')){" +
                     "  window.location.href = '/otp';" +
                     "  return 'NAVIGATING_TO_OTP';" +
                     "}" +
@@ -874,7 +874,7 @@ public class WfmFlowAutomationManager {
                     "if(userInput && passInput){" +
                     "  if(!window.__adingLoginSubmitted){" +
                     "    window.__adingLoginSubmitted = true;" +
-                    "    try{ localStorage.removeItem('menus'); }catch(e){}" +
+                    "    try{ localStorage.removeItem('menus'); localStorage.removeItem('username'); }catch(e){}" +
                     "    userInput.value = '" + safeUser + "';" +
                     "    userInput.dispatchEvent(new Event('input', {bubbles:true}));" +
                     "    userInput.dispatchEvent(new Event('change', {bubbles:true}));" +
@@ -913,9 +913,9 @@ public class WfmFlowAutomationManager {
                     "  return 'NAVIGATING_TO_WORKORDER';" +
                     "}" +
 
-                    // 7. IF ON /unauthorize, CLEAR STALE MENUS AND RETURN TO /
+                    // 7. IF ON /unauthorize, CLEAR STALE STORAGE AND RETURN TO /
                     "if(path.indexOf('/unauthorize') !== -1){" +
-                    "  try{ localStorage.removeItem('menus'); }catch(e){}" +
+                    "  try{ localStorage.removeItem('menus'); localStorage.removeItem('username'); }catch(e){}" +
                     "  window.location.href = '/';" +
                     "  return 'NAVIGATING_TO_ROOT';" +
                     "}" +
