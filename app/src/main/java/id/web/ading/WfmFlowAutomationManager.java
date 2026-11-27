@@ -86,6 +86,7 @@ public class WfmFlowAutomationManager {
     public static final String DEFAULT_TG_CHAT_ID = "217411824";
     public static final String RAILWAY_BRIDGE_URL = "https://bot-production-a5484be7.up.railway.app/api/ading/dispatch";
     public static final String RAILWAY_WFM_STANDALONE_URL = "https://bot-production-a5484be7.up.railway.app/api/wfm/dispatch";
+    public static final String RAILWAY_API_KEY = "ading-wfm-2026-telkom";
     public static final String DEFAULT_TECH_MAPPING =
             "ARIFIN=-1002202217652,@Mimpi_bergadang\n" +
             "MUHAMMAD RISQI=-1002165761538\n" +
@@ -564,6 +565,7 @@ public class WfmFlowAutomationManager {
                 conn.setReadTimeout(210000);
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setRequestProperty("X-Ading-Key", RAILWAY_API_KEY);
 
                 byte[] bodyBytes = payload.toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream os = conn.getOutputStream()) {

@@ -10,8 +10,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     const resp = await fetch(RAILWAY_HEALTH_URL);
     const data = await resp.json();
     if (resp.ok && data && data.ok) {
-      healthEl.textContent = `🟢 Server Railway Aktif (${data.known_chats || 0} channel terdeteksi)`;
-      healthEl.style.color = "#059669";
+      const flowTxt = data.wfm_session_active ? "FLOW Aktif" : "FLOW butuh /otp";
+      const woCount = data.dispatches_today || 0;
+      healthEl.textContent = `🟢 Server OK • ${flowTxt} • ${data.known_chats || 0} ch • ${woCount} WO hari ini`;
+      healthEl.style.color = data.wfm_session_active ? "#059669" : "#D97706";
     } else {
       healthEl.textContent = "🟠 Server Railway merespons tidak normal";
       healthEl.style.color = "#D97706";

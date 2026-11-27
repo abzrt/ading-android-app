@@ -1,4 +1,5 @@
 const RAILWAY_WFM_STANDALONE_URL = "https://bot-production-a5484be7.up.railway.app/api/wfm/dispatch";
+const ADING_API_KEY = "ading-wfm-2026-telkom";
 const DEFAULT_FALLBACK_CHAT_ID = "217411824";
 
 async function getFallbackChatId() {
@@ -43,7 +44,10 @@ async function startDispatchFlow(payload, adingTabId) {
     const fallbackChatId = await getFallbackChatId();
     const resp = await fetch(RAILWAY_WFM_STANDALONE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Ading-Key": ADING_API_KEY,
+      },
       body: JSON.stringify({
         wonum,
         leader_name: payload.leader_name || "",
