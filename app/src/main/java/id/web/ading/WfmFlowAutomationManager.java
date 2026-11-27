@@ -687,25 +687,13 @@ public class WfmFlowAutomationManager {
                         extAddress = extractedJson.optString("service_address", "").trim();
                     }
 
-                    String aoWoLabel = noSc + (!resolvedWonum[0].isEmpty() ? " | " + resolvedWonum[0] : "");
-                    new AdingNotificationBridge(activity).notifyTaskAssigned(
-                            aoWoLabel,
-                            techDisplay,
-                            !extCustName.isEmpty() ? extCustName : "-",
-                            !extServiceNo.isEmpty() ? extServiceNo : "-",
-                            !odp.isEmpty() ? odp : "-",
-                            !paket.isEmpty() ? paket : "-",
-                            !extAddress.isEmpty() ? extAddress : "-",
-                            !extContactNo.isEmpty() ? extContactNo : "-",
-                            !bookingDate.isEmpty() ? bookingDate : "-",
-                            "Manja On Track",
-                            !koordinat.isEmpty() ? koordinat : "-",
-                            "-",
-                            !assignedBy.isEmpty() ? assignedBy : "AHMAD PAIDI"
-                    );
-
                     persistCookies(activity);
-                    cancelProgressNotification(activity);
+
+                    String woLabel = !resolvedWonum[0].isEmpty() ? resolvedWonum[0] : "-";
+                    String custLabel = !extCustName.isEmpty() ? extCustName : "-";
+                    String srvLabel = !extServiceNo.isEmpty() ? extServiceNo : "-";
+                    String odpLabel = !odp.isEmpty() ? odp : "-";
+                    String paketLabel = !paket.isEmpty() ? paket : "-";
 
                     // Auto-send cropped Workorder SS + ADING "Salin" text to matched Technician Channel (+ Personal ID) via Telegram Bot
                     String tgToken = prefs.getString(KEY_TG_TOKEN, DEFAULT_TG_TOKEN).trim();
@@ -745,6 +733,12 @@ public class WfmFlowAutomationManager {
                         String captionWithMention = mentionTags.length() > 0
                                 ? (finalCaption + "\n\n👷 " + mentionTags.toString())
                                 : finalCaption;
+                        updateProgressNotification(
+                                activity,
+                                "📤 Mengirim ke Bot Telegram: " + woLabel,
+                                "Teknisi: " + techDisplay + "\nMengunggah SS Workorder & Data Salin...",
+                                true
+                        );
                         Toast.makeText(activity, "📤 Mengirim SS WFM & Data ke Telegram (" + techDisplay + ")...", Toast.LENGTH_SHORT).show();
                         tgExecutor.execute(() -> {
                             int sentCount = 0;
@@ -754,20 +748,57 @@ public class WfmFlowAutomationManager {
                                     sentCount++;
                                 }
                             }
+                            boolean fallbackSent = false;
+                            if (sentCount == 0 && !fallbackChatId.isEmpty() && !numericTargets.contains(fallbackChatId)) {
+                                String fbCaption = "⚠️ Gagal kirim ke channel " + techDisplay + " (pastikan @biarndalupa_bot jadi Admin channel).\n\n" + captionWithMention;
+                                fallbackSent = uploadPhotoToTelegram(tgToken, fallbackChatId, tgThreadId, photoCopy, fbCaption);
+                            }
                             if (photoCopy != null && !photoCopy.isRecycled()) {
                                 photoCopy.recycle();
                             }
                             final int finalSent = sentCount;
                             final int totalTargets = numericTargets.size();
+                            final boolean finalFallbackSent = fallbackSent;
                             mainHandler.post(() -> {
+                                String summaryLines = "NO SC: " + noSc
+                                        + "\nWONUM: " + woLabel
+                                        + "\nCustomer: " + custLabel
+                                        + "\nNo Internet: " + srvLabel
+                                        + "\nODP: " + odpLabel + " | Paket: " + paketLabel;
                                 if (finalSent > 0) {
-                                    Toast.makeText(activity, "✅ SS WFM & Data " + (!resolvedWonum[0].isEmpty() ? resolvedWonum[0] : noSc) + " terkirim ke " + finalSent + "/" + totalTargets + " target Telegram (" + techDisplay + ")!", Toast.LENGTH_LONG).show();
+                                    updateProgressNotification(
+                                            activity,
+                                            "✅ Terkirim ke Telegram — " + techDisplay,
+                                            summaryLines + "\nStatus: SS FLOW & Data Salin terkirim (" + finalSent + "/" + totalTargets + ").",
+                                            false
+                                    );
+                                    Toast.makeText(activity, "✅ SS WFM & Data " + woLabel + " terkirim ke Telegram (" + techDisplay + ")!", Toast.LENGTH_LONG).show();
+                                } else if (finalFallbackSent) {
+                                    updateProgressNotification(
+                                            activity,
+                                            "⚠️ Dialihkan ke Chat Pribadi — " + techDisplay,
+                                            summaryLines + "\nChannel teknisi gagal (jadikan @biarndalupa_bot Admin channel). SS dikirim ke chat pribadi Anda.",
+                                            false
+                                    );
+                                    Toast.makeText(activity, "⚠️ Channel " + techDisplay + " gagal, SS dialihkan ke chat pribadi Anda!", Toast.LENGTH_LONG).show();
                                 } else {
-                                    Toast.makeText(activity, "⚠️ SS tersimpan di Galeri, tapi gagal kirim ke Telegram (" + techDisplay + "). Pastikan bot sudah jadi Admin channel.", Toast.LENGTH_LONG).show();
+                                    updateProgressNotification(
+                                            activity,
+                                            "❌ Gagal Kirim Telegram — " + techDisplay,
+                                            summaryLines + "\nSS tersimpan di Galeri, tapi gagal kirim ke bot Telegram.",
+                                            false
+                                    );
+                                    Toast.makeText(activity, "⚠️ SS tersimpan di Galeri, tapi gagal kirim ke Telegram (" + techDisplay + ").", Toast.LENGTH_LONG).show();
                                 }
                             });
                         });
                     } else {
+                        updateProgressNotification(
+                                activity,
+                                "✅ SS FLOW Disimpan — " + techDisplay,
+                                "NO SC: " + noSc + "\nWONUM: " + woLabel + "\nSS Workorder disimpan ke Galeri.",
+                                false
+                        );
                         Toast.makeText(activity, "✅ Order " + noSc + " berhasil diproses & SS WFM disimpan ke Galeri!", Toast.LENGTH_LONG).show();
                     }
                     mainHandler.postDelayed(cleanup, 1200);
@@ -1394,8 +1425,8 @@ public class WfmFlowAutomationManager {
                 "      }" +
                 "      var p = n.parentElement;" +
                 "      if(p){" +
-                "        var inp2 = p.querySelector('input,textarea,select,.form-control');" +
-                "        if(inp2 && inp2 !== n) return (inp2.value || inp2.innerText || '').trim();" +
+                "        var pInps = p.querySelectorAll('input,textarea,select,.form-control');" +
+                "        if(pInps.length === 1 && pInps[0] !== n) return (pInps[0].value || pInps[0].innerText || '').trim();" +
                 "        var psib = p.nextElementSibling;" +
                 "        if(psib){" +
                 "          var inp3 = psib.matches('input,textarea,select') ? psib : psib.querySelector('input,textarea,select,.form-control');" +
