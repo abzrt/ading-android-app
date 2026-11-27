@@ -104,6 +104,7 @@ public class WfmFlowAutomationManager {
 
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final ExecutorService tgExecutor = Executors.newSingleThreadExecutor();
+    private static long sActiveRunId = 0L;
 
     public static SharedPreferences getPrefs(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -575,50 +576,59 @@ public class WfmFlowAutomationManager {
             }
             if (root == null) return;
 
-            View oldBg = root.findViewWithTag("TAG_WFM_BG_CONTAINER");
-            if (oldBg != null) {
-                root.removeView(oldBg);
-            }
-
-            FrameLayout bgContainer = new FrameLayout(activity);
-            bgContainer.setTag("TAG_WFM_BG_CONTAINER");
+            final long runId = ++sActiveRunId;
             int bgWidth = 1366;
             int bgHeight = 950;
-            RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(bgWidth, bgHeight);
-            bgContainer.setLayoutParams(lp);
+            FrameLayout bgContainer;
+            WebView bgWebView;
+            View oldBg = root.findViewWithTag("TAG_WFM_BG_CONTAINER");
+            if (oldBg instanceof FrameLayout
+                    && ((FrameLayout) oldBg).getChildCount() > 0
+                    && ((FrameLayout) oldBg).getChildAt(0) instanceof WebView) {
+                // Reuse persistent FLOW WebView so sessionStorage, cookies, and OTP session stay alive!
+                bgContainer = (FrameLayout) oldBg;
+                bgWebView = (WebView) bgContainer.getChildAt(0);
+            } else {
+                if (oldBg != null) {
+                    root.removeView(oldBg);
+                }
+                bgContainer = new FrameLayout(activity);
+                bgContainer.setTag("TAG_WFM_BG_CONTAINER");
+                RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(bgWidth, bgHeight);
+                bgContainer.setLayoutParams(lp);
+                bgContainer.setFocusable(false);
+                bgContainer.setFocusableInTouchMode(false);
+                bgContainer.setClickable(false);
 
-            bgContainer.setFocusable(false);
-            bgContainer.setFocusableInTouchMode(false);
-            bgContainer.setClickable(false);
+                bgWebView = new WebView(activity);
+                bgWebView.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                bgWebView.setFocusable(false);
+                bgWebView.setFocusableInTouchMode(false);
+                bgWebView.setClickable(false);
 
-            WebView bgWebView = new WebView(activity);
-            bgWebView.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            bgWebView.setFocusable(false);
-            bgWebView.setFocusableInTouchMode(false);
-            bgWebView.setClickable(false);
+                WebSettings settings = bgWebView.getSettings();
+                settings.setJavaScriptEnabled(true);
+                settings.setDomStorageEnabled(true);
+                settings.setDatabaseEnabled(true);
+                settings.setUseWideViewPort(true);
+                settings.setLoadWithOverviewMode(true);
+                settings.setSupportZoom(true);
+                settings.setBuiltInZoomControls(true);
+                settings.setDisplayZoomControls(false);
+                settings.setTextZoom(100);
+                settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
 
-            WebSettings settings = bgWebView.getSettings();
-            settings.setJavaScriptEnabled(true);
-            settings.setDomStorageEnabled(true);
-            settings.setDatabaseEnabled(true);
-            settings.setUseWideViewPort(true);
-            settings.setLoadWithOverviewMode(true);
-            settings.setSupportZoom(true);
-            settings.setBuiltInZoomControls(true);
-            settings.setDisplayZoomControls(false);
-            settings.setTextZoom(100);
-            settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+                float density = activity.getResources().getDisplayMetrics().density;
+                int desktopScale = Math.max(20, Math.round(100f / Math.max(1f, density)));
+                bgWebView.setInitialScale(desktopScale);
 
-            float density = activity.getResources().getDisplayMetrics().density;
-            int desktopScale = Math.max(20, Math.round(100f / Math.max(1f, density)));
-            bgWebView.setInitialScale(desktopScale);
+                CookieManager cm = CookieManager.getInstance();
+                cm.setAcceptCookie(true);
+                cm.setAcceptThirdPartyCookies(bgWebView, true);
 
-            CookieManager cm = CookieManager.getInstance();
-            cm.setAcceptCookie(true);
-            cm.setAcceptThirdPartyCookies(bgWebView, true);
-
-            bgContainer.addView(bgWebView);
-            root.addView(bgContainer, 0); // At index 0 behind everything
+                bgContainer.addView(bgWebView);
+                root.addView(bgContainer, 0); // At index 0 behind everything
+            }
 
             bgContainer.measure(
                     View.MeasureSpec.makeMeasureSpec(bgWidth, View.MeasureSpec.EXACTLY),
@@ -636,21 +646,11 @@ public class WfmFlowAutomationManager {
             final boolean[] isFinished = {false};
             final boolean[] isWaitingForOtp = {false};
 
-            final ViewGroup finalRoot = root;
+            // Keep FLOW WebView alive in background after dispatch so OTP session is never destroyed!
             Runnable cleanup = () -> {
                 if (isFinished[0]) return;
                 isFinished[0] = true;
-                mainHandler.post(() -> {
-                    try {
-                        persistCookies(activity);
-                        bgWebView.stopLoading();
-                        bgWebView.loadUrl("about:blank");
-                        bgContainer.removeAllViews();
-                        bgWebView.destroy();
-                        finalRoot.removeView(bgContainer);
-                    } catch (Exception ignored) {
-                    }
-                });
+                mainHandler.post(() -> persistCookies(activity));
             };
 
             Runnable onFlowWorkorderReady = () -> {
@@ -806,9 +806,15 @@ public class WfmFlowAutomationManager {
             String startFlowUrl = !resolvedWonum[0].isEmpty()
                     ? (FLOW_EDIT_WORKORDER_URL + resolvedWonum[0])
                     : FLOW_WORKORDER_URL;
-            bgWebView.loadUrl(startFlowUrl);
+            bgWebView.evaluateJavascript("window.__adingNavigatedToWo=false;window.__adingLoginSubmitted=false;window.__adingOtpSubmitted=false;", null);
+            if (startFlowUrl.equals(bgWebView.getUrl())) {
+                bgWebView.reload();
+            } else {
+                bgWebView.loadUrl(startFlowUrl);
+            }
             runFlowPipelineFastLoop(
                     bgWebView,
+                    runId,
                     isFinished,
                     noSc,
                     resolvedWonum[0],
@@ -837,6 +843,7 @@ public class WfmFlowAutomationManager {
      */
     private static void runFlowPipelineFastLoop(
             WebView view,
+            long runId,
             boolean[] isFinished,
             String noSc,
             String targetWonum,
@@ -849,8 +856,8 @@ public class WfmFlowAutomationManager {
             Runnable cleanup,
             int attempt
     ) {
-        if (isFinished[0] || flowSsCaptured[0] || attempt > 110) {
-            if (attempt > 110 && !flowSsCaptured[0] && !isFinished[0]) {
+        if (runId != sActiveRunId || isFinished[0] || flowSsCaptured[0] || attempt > 110) {
+            if (runId == sActiveRunId && attempt > 110 && !flowSsCaptured[0] && !isFinished[0]) {
                 String curUrl = "";
                 try { curUrl = view != null && view.getUrl() != null ? view.getUrl() : ""; } catch (Exception ignored) {}
                 String woInfo = (targetWonum != null && !targetWonum.isEmpty()) ? targetWonum : ("(kosong, SC=" + noSc + ")");
@@ -865,11 +872,11 @@ public class WfmFlowAutomationManager {
         }
 
         mainHandler.postDelayed(() -> {
-            if (isFinished[0] || flowSsCaptured[0]) return;
+            if (runId != sActiveRunId || isFinished[0] || flowSsCaptured[0]) return;
 
             // Pause polling while waiting for user to type OTP in the dialog - do NOT increment attempt
             if (isWaitingForOtp[0]) {
-                runFlowPipelineFastLoop(view, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt);
+                runFlowPipelineFastLoop(view, runId, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt);
                 return;
             }
 
@@ -1108,15 +1115,15 @@ public class WfmFlowAutomationManager {
 
             final boolean[] callbackFired = {false};
             Runnable evalWatchdog = () -> {
-                if (!callbackFired[0] && !isFinished[0] && !flowSsCaptured[0]) {
+                if (!callbackFired[0] && runId == sActiveRunId && !isFinished[0] && !flowSsCaptured[0]) {
                     callbackFired[0] = true;
-                    runFlowPipelineFastLoop(view, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
+                    runFlowPipelineFastLoop(view, runId, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
                 }
             };
             mainHandler.postDelayed(evalWatchdog, 2500);
 
             view.evaluateJavascript(js, result -> {
-                if (callbackFired[0]) return;
+                if (callbackFired[0] || runId != sActiveRunId) return;
                 callbackFired[0] = true;
                 mainHandler.removeCallbacks(evalWatchdog);
                 String res = result != null ? result.replace("\"", "") : "";
@@ -1153,7 +1160,7 @@ public class WfmFlowAutomationManager {
                     mainHandler.postDelayed(onCardReady, 600);
                     return;
                 }
-                runFlowPipelineFastLoop(view, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
+                runFlowPipelineFastLoop(view, runId, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
             });
         }, 350);
     }
