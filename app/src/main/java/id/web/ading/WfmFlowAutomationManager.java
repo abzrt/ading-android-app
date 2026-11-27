@@ -54,7 +54,13 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class WfmFlowAutomationManager {
 
@@ -65,10 +71,15 @@ public class WfmFlowAutomationManager {
 
     public static final String DEFAULT_FLOW_USER = "16830482";
     public static final String DEFAULT_FLOW_PASS = "narindo1";
+    public static final String DEFAULT_TG_TOKEN = "9111712229:AAERRc7RmQMXy4LSIvA-mty5Ckw6q-b0cUQ";
+    public static final String DEFAULT_TG_CHAT_ID = "217411824";
 
     private static final String PREFS_NAME = "ading_wfm_prefs";
     private static final String KEY_FLOW_USER = "flow_username";
     private static final String KEY_FLOW_PASS = "flow_password";
+    private static final String KEY_TG_TOKEN = "tg_bot_token";
+    private static final String KEY_TG_CHAT_ID = "tg_chat_id";
+    private static final String KEY_TG_THREAD_ID = "tg_thread_id";
 
     private static final String KEY_FLOW_COOKIES = "flow_saved_cookies";
 
@@ -77,6 +88,7 @@ public class WfmFlowAutomationManager {
     private static final int NOTIF_PROGRESS_ID = 8801;
 
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static final ExecutorService tgExecutor = Executors.newSingleThreadExecutor();
 
     public static SharedPreferences getPrefs(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -95,6 +107,15 @@ public class WfmFlowAutomationManager {
         prefs.edit()
                 .putString(KEY_FLOW_USER, (flowUser != null && !flowUser.trim().isEmpty()) ? flowUser.trim() : DEFAULT_FLOW_USER)
                 .putString(KEY_FLOW_PASS, (flowPass != null && !flowPass.isEmpty()) ? flowPass : DEFAULT_FLOW_PASS)
+                .apply();
+    }
+
+    public static void saveTelegramConfig(Context context, String token, String chatId, String threadId) {
+        SharedPreferences prefs = getPrefs(context);
+        prefs.edit()
+                .putString(KEY_TG_TOKEN, (token != null && !token.trim().isEmpty()) ? token.trim() : DEFAULT_TG_TOKEN)
+                .putString(KEY_TG_CHAT_ID, (chatId != null && !chatId.trim().isEmpty()) ? chatId.trim() : DEFAULT_TG_CHAT_ID)
+                .putString(KEY_TG_THREAD_ID, threadId != null ? threadId.trim() : "")
                 .apply();
     }
 
@@ -293,6 +314,29 @@ public class WfmFlowAutomationManager {
                 "window.__adingDispatchHooked = true;" +
                 "window.__adingOrdersBySc = window.__adingOrdersBySc || {};" +
                 "window.__adingTeamsCache = window.__adingTeamsCache || [];" +
+                "window.__adingLastCopiedText = '';" +
+                "try {" +
+                "  if(navigator.clipboard && navigator.clipboard.writeText){" +
+                "    var _origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);" +
+                "    navigator.clipboard.writeText = function(txt){" +
+                "      if(typeof txt === 'string' && txt.trim().length > 10){ window.__adingLastCopiedText = txt.trim(); }" +
+                "      return _origWriteText(txt).catch(function(){});" +
+                "    };" +
+                "  }" +
+                "  var _origExec = document.execCommand ? document.execCommand.bind(document) : null;" +
+                "  if(_origExec){" +
+                "    document.execCommand = function(cmd){" +
+                "      if(String(cmd).toLowerCase() === 'copy'){" +
+                "        var sel = window.getSelection ? String(window.getSelection()) : '';" +
+                "        var act = document.activeElement;" +
+                "        var val = (act && (act.value || act.textContent)) ? String(act.value || act.textContent) : '';" +
+                "        var cap = (sel && sel.trim().length > 10) ? sel.trim() : (val.trim().length > 10 ? val.trim() : '');" +
+                "        if(cap){ window.__adingLastCopiedText = cap; }" +
+                "      }" +
+                "      return _origExec.apply(document, arguments);" +
+                "    };" +
+                "  }" +
+                "} catch(ce){}" +
                 "function fetchTeams(endpoint){" +
                 "  fetch(window.location.origin + endpoint + '?_t=' + Date.now())" +
                 "    .then(function(r){ return r.ok ? r.json() : []; })" +
@@ -350,6 +394,23 @@ public class WfmFlowAutomationManager {
                 "              }" +
                 "            }" +
                 "          }" +
+                "          window.__adingLastCopiedText = '';" +
+                "          try {" +
+                "            var salinBtn = null;" +
+                "            var cards = document.querySelectorAll('tr, .card, div');" +
+                "            for(var ci=0; ci<cards.length; ci++){" +
+                "              var cTxt = cards[ci].innerText || '';" +
+                "              if(noSc && cTxt.indexOf(noSc) !== -1 && cTxt.length < 2500){" +
+                "                var btns = cards[ci].querySelectorAll('button, a, [role=\"button\"]');" +
+                "                for(var bi=0; bi<btns.length; bi++){" +
+                "                  var bLabel = (btns[bi].innerText || btns[bi].textContent || '').trim().toLowerCase();" +
+                "                  if(bLabel === 'salin' || bLabel.indexOf('salin') !== -1){ salinBtn = btns[bi]; break; }" +
+                "                }" +
+                "                if(salinBtn) break;" +
+                "              }" +
+                "            }" +
+                "            if(salinBtn){ salinBtn.click(); }" +
+                "          } catch(se){}" +
                 "          var payload = {" +
                 "            no_sc: noSc," +
                 "            wonum: resolvedWonum," +
@@ -362,11 +423,15 @@ public class WfmFlowAutomationManager {
                 "            odp: cachedOrder.ODP || ''," +
                 "            koordinat: cachedOrder.KORDINAT || ''," +
                 "            booking_date: cachedOrder.BOOKING_DATE || (tgl ? tgl + ' 08:00:00' : '')," +
-                "            assigned_by: assignedBy" +
+                "            assigned_by: assignedBy," +
+                "            copied_text: ''" +
                 "          };" +
-                "          if(noSc && window.AdingAndroid && window.AdingAndroid.onDispatchOrderTriggered){" +
-                "            window.AdingAndroid.onDispatchOrderTriggered(JSON.stringify(payload));" +
-                "          }" +
+                "          setTimeout(function(){" +
+                "            payload.copied_text = window.__adingLastCopiedText || '';" +
+                "            if(noSc && window.AdingAndroid && window.AdingAndroid.onDispatchOrderTriggered){" +
+                "              window.AdingAndroid.onDispatchOrderTriggered(JSON.stringify(payload));" +
+                "            }" +
+                "          }, 120);" +
                 "        }" +
                 "      }" +
                 "    } catch(e){}" +
@@ -395,6 +460,7 @@ public class WfmFlowAutomationManager {
             String koordinat = obj.optString("koordinat", "").trim();
             String bookingDate = obj.optString("booking_date", "").trim();
             String assignedBy = obj.optString("assigned_by", "").trim();
+            String copiedText = obj.optString("copied_text", "").trim();
 
             runFullDispatchToFlowPipeline(
                     activity,
@@ -408,7 +474,8 @@ public class WfmFlowAutomationManager {
                     odp,
                     koordinat,
                     bookingDate,
-                    assignedBy
+                    assignedBy,
+                    copiedText
             );
         } catch (Exception ignored) {
         }
@@ -419,8 +486,8 @@ public class WfmFlowAutomationManager {
      * - Restores persistent cookies so session is active immediately.
      * - Fast-loop polls every 350ms, auto-submits login, fast-overrides SweetAlert timers.
      * - Instantly shows native OTP dialog on screen when OTP is ready.
-     * - Once OTP is entered, immediately continues to /workorder, filters, crops screenshot,
-     *   saves to Gallery/Clipboard, and triggers task assigned notification!
+     * - Once OTP is entered, immediately continues to /EditWorkorder/<WONUM>, crops screenshot,
+     *   saves to Gallery/Clipboard, and auto-sends SS + Salin text to Telegram Bot!
      */
     @SuppressLint("SetJavaScriptEnabled")
     public static void runFullDispatchToFlowPipeline(
@@ -436,6 +503,28 @@ public class WfmFlowAutomationManager {
             String koordinat,
             String bookingDate,
             String assignedBy
+    ) {
+        runFullDispatchToFlowPipeline(
+                activity, noSc, initialWonum, serviceArea, namaTim, leaderNik,
+                leaderName, paket, odp, koordinat, bookingDate, assignedBy, ""
+        );
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    public static void runFullDispatchToFlowPipeline(
+            Activity activity,
+            String noSc,
+            String initialWonum,
+            String serviceArea,
+            String namaTim,
+            String leaderNik,
+            String leaderName,
+            String paket,
+            String odp,
+            String koordinat,
+            String bookingDate,
+            String assignedBy,
+            String copiedText
     ) {
         if (activity == null || activity.isFinishing()) return;
         mainHandler.post(() -> {
@@ -594,7 +683,45 @@ public class WfmFlowAutomationManager {
 
                     persistCookies(activity);
                     cancelProgressNotification(activity);
-                    Toast.makeText(activity, "✅ Order " + noSc + " berhasil diproses & SS WFM disimpan ke Galeri!", Toast.LENGTH_LONG).show();
+
+                    // Auto-send cropped Workorder SS + ADING "Salin" text to Telegram Bot (@biarndalupa_bot)
+                    String tgToken = prefs.getString(KEY_TG_TOKEN, DEFAULT_TG_TOKEN).trim();
+                    String tgChatId = prefs.getString(KEY_TG_CHAT_ID, DEFAULT_TG_CHAT_ID).trim();
+                    String tgThreadId = prefs.getString(KEY_TG_THREAD_ID, "").trim();
+                    if (croppedBitmap != null && !tgToken.isEmpty() && !tgChatId.isEmpty()) {
+                        String finalCaption = (copiedText != null && !copiedText.trim().isEmpty())
+                                ? copiedText.trim()
+                                : buildFallbackTelegramCaption(
+                                        noSc,
+                                        resolvedWonum[0],
+                                        bookingDate,
+                                        serviceArea,
+                                        paket,
+                                        extServiceNo,
+                                        extCustName,
+                                        extContactNo,
+                                        extAddress,
+                                        odp,
+                                        koordinat
+                                );
+                        Bitmap photoCopy = croppedBitmap.copy(croppedBitmap.getConfig() != null ? croppedBitmap.getConfig() : Bitmap.Config.ARGB_8888, false);
+                        Toast.makeText(activity, "📤 Mengirim SS WFM & Data Salin ke Telegram...", Toast.LENGTH_SHORT).show();
+                        tgExecutor.execute(() -> {
+                            boolean sent = uploadPhotoToTelegram(tgToken, tgChatId, tgThreadId, photoCopy, finalCaption);
+                            if (photoCopy != null && !photoCopy.isRecycled()) {
+                                photoCopy.recycle();
+                            }
+                            mainHandler.post(() -> {
+                                if (sent) {
+                                    Toast.makeText(activity, "✅ SS WFM & Data " + (!resolvedWonum[0].isEmpty() ? resolvedWonum[0] : noSc) + " terkirim ke Telegram!", Toast.LENGTH_LONG).show();
+                                } else {
+                                    Toast.makeText(activity, "⚠️ SS tersimpan di Galeri, tapi gagal kirim ke Telegram.", Toast.LENGTH_LONG).show();
+                                }
+                            });
+                        });
+                    } else {
+                        Toast.makeText(activity, "✅ Order " + noSc + " berhasil diproses & SS WFM disimpan ke Galeri!", Toast.LENGTH_LONG).show();
+                    }
                     mainHandler.postDelayed(cleanup, 1200);
                 });
             };
@@ -1367,6 +1494,14 @@ public class WfmFlowAutomationManager {
             container.addView(etFlowUser);
             container.addView(etFlowPass);
 
+            addSectionHeader(container, activity, "✈️ Bot Telegram AutoSender");
+            EditText etTgToken = createInput(activity, "Bot Token Telegram", prefs.getString(KEY_TG_TOKEN, DEFAULT_TG_TOKEN), false);
+            EditText etTgChatId = createInput(activity, "Chat ID Tujuan", prefs.getString(KEY_TG_CHAT_ID, DEFAULT_TG_CHAT_ID), false);
+            EditText etTgThreadId = createInput(activity, "Topic / Thread ID (opsional)", prefs.getString(KEY_TG_THREAD_ID, ""), false);
+            container.addView(etTgToken);
+            container.addView(etTgChatId);
+            container.addView(etTgThreadId);
+
             AlertDialog dialog = new AlertDialog.Builder(activity)
                     .setView(scrollView)
                     .setPositiveButton("🚀 Jalankan Otomasi", null)
@@ -1376,6 +1511,7 @@ public class WfmFlowAutomationManager {
 
             btnLoginFlow.setOnClickListener(v -> {
                 saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
+                saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString());
                 dialog.dismiss();
                 openSessionHelperDialog(activity, FLOW_WORKORDER_URL, "🔑 Sesi Login FLOW Telkom Akses");
             });
@@ -1383,11 +1519,13 @@ public class WfmFlowAutomationManager {
             dialog.setOnShowListener(dlg -> {
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
                     saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
-                    Toast.makeText(activity, "Kredensial FLOW disimpan!", Toast.LENGTH_SHORT).show();
+                    saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString());
+                    Toast.makeText(activity, "Kredensial FLOW & Bot Telegram disimpan!", Toast.LENGTH_SHORT).show();
                 });
 
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
+                    saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString());
                     String inputVal = etNoSc.getText().toString().trim();
                     if (inputVal.isEmpty()) {
                         Toast.makeText(activity, "Masukkan WONUM atau NO SC terlebih dahulu!", Toast.LENGTH_SHORT).show();
@@ -1523,6 +1661,88 @@ public class WfmFlowAutomationManager {
 
     private static int dp(Context context, int dp) {
         return (int) (dp * context.getResources().getDisplayMetrics().density);
+    }
+
+    private static String buildFallbackTelegramCaption(
+            String noSc,
+            String wonum,
+            String bookingDate,
+            String sto,
+            String paket,
+            String noInternet,
+            String customerName,
+            String contactNumber,
+            String alamat,
+            String odp,
+            String koordinat
+    ) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("NO SC: ").append(nonEmptyOrDash(noSc)).append("\n");
+        sb.append("WONUM: ").append(nonEmptyOrDash(wonum)).append("\n");
+        sb.append("BOOKING DATE: ").append(nonEmptyOrDash(bookingDate)).append("\n");
+        sb.append("STO: ").append(nonEmptyOrDash(sto)).append("\n");
+        sb.append("PAKET: ").append(nonEmptyOrDash(paket)).append("\n");
+        sb.append("NO INTERNET: ").append(nonEmptyOrDash(noInternet)).append("\n");
+        sb.append("CUSTOMER NAME: ").append(nonEmptyOrDash(customerName)).append("\n");
+        sb.append("CONTACT NUMBER: ").append(nonEmptyOrDash(contactNumber)).append("\n");
+        sb.append("ALAMAT: ").append(nonEmptyOrDash(alamat)).append("\n");
+        sb.append("ODP: ").append(nonEmptyOrDash(odp)).append("\n");
+        sb.append("KORDINAT: ").append(nonEmptyOrDash(koordinat));
+        return sb.toString();
+    }
+
+    private static String nonEmptyOrDash(String v) {
+        return (v != null && !v.trim().isEmpty()) ? v.trim() : "-";
+    }
+
+    private static boolean uploadPhotoToTelegram(String token, String chatId, String threadId, Bitmap bitmap, String caption) {
+        HttpURLConnection conn = null;
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.PNG, 95, baos);
+            byte[] pngBytes = baos.toByteArray();
+
+            String boundary = "----AdingTelegramBoundary" + System.currentTimeMillis();
+            URL url = new URL("https://api.telegram.org/bot" + token + "/sendPhoto");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(25000);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+            try (DataOutputStream out = new DataOutputStream(conn.getOutputStream())) {
+                writeMultipartField(out, boundary, "chat_id", chatId);
+                if (threadId != null && !threadId.trim().isEmpty()) {
+                    writeMultipartField(out, boundary, "message_thread_id", threadId.trim());
+                }
+                if (caption != null && !caption.isEmpty()) {
+                    String safeCaption = caption.length() > 1020 ? caption.substring(0, 1020) : caption;
+                    writeMultipartField(out, boundary, "caption", safeCaption);
+                }
+                out.writeBytes("--" + boundary + "\r\n");
+                out.writeBytes("Content-Disposition: form-data; name=\"photo\"; filename=\"workorder.png\"\r\n");
+                out.writeBytes("Content-Type: image/png\r\n\r\n");
+                out.write(pngBytes);
+                out.writeBytes("\r\n--" + boundary + "--\r\n");
+                out.flush();
+            }
+
+            int code = conn.getResponseCode();
+            return code >= 200 && code < 300;
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static void writeMultipartField(DataOutputStream out, String boundary, String name, String value) throws Exception {
+        out.writeBytes("--" + boundary + "\r\n");
+        out.writeBytes("Content-Disposition: form-data; name=\"" + name + "\"\r\n");
+        out.writeBytes("Content-Type: text/plain; charset=UTF-8\r\n\r\n");
+        out.write(value.getBytes(StandardCharsets.UTF_8));
+        out.writeBytes("\r\n");
     }
 
     private static String escapeJs(String s) {
