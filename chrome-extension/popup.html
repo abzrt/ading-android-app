@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>ADING Auto-Dispatch WFM FLOW</title>
+  <style>
+    body {
+      width: 340px;
+      margin: 0;
+      padding: 16px;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #FFFFFF;
+      color: #111827;
+    }
+    .badge {
+      display: inline-block;
+      background: #EEF2FF;
+      color: #1E3A8A;
+      font-weight: 700;
+      font-size: 10.5px;
+      padding: 3px 10px;
+      border-radius: 99px;
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 16px;
+      margin: 0 0 4px 0;
+    }
+    p.sub {
+      font-size: 12px;
+      color: #6B7280;
+      margin: 0 0 14px 0;
+      line-height: 1.4;
+    }
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #6B7280;
+      margin: 10px 0 4px 0;
+      text-transform: uppercase;
+    }
+    input, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      background: #F9FAFB;
+      border: 1px solid #D1D5DB;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #111827;
+      font-family: ui-monospace, monospace;
+    }
+    textarea {
+      min-height: 118px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    button {
+      flex: 1;
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 12.5px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-secondary {
+      background: #FFFFFF;
+      color: #374151;
+      border: 1px solid #D1D5DB;
+    }
+    .btn-primary {
+      background: #1E3A8A;
+      color: #FFFFFF;
+      border: none;
+    }
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #059669;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="badge">ADING • WFM FLOW</div>
+  <h1>Auto-Dispatch Chrome Extension</h1>
+  <p class="sub">Klik Dispatch di <b>ading.web.id</b> → otomatis SS kartu Workorder HD dari FLOW, unmask nama/alamat, &amp; kirim ke channel teknisi.</p>
+
+  <label for="tgToken">Bot Token Telegram</label>
+  <input id="tgToken" type="text" />
+
+  <label for="fallbackChatId">Chat ID Fallback</label>
+  <input id="fallbackChatId" type="text" />
+
+  <label for="techMapping">Mapping Teknisi (NAMA=CHANNEL,@MENTION)</label>
+  <textarea id="techMapping"></textarea>
+
+  <div class="btn-row">
+    <button id="btnFlow" class="btn-secondary">🔑 Buka FLOW</button>
+    <button id="btnSave" class="btn-primary">Simpan</button>
+  </div>
+  <div id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
