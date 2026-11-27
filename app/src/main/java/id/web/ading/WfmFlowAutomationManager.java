@@ -1525,7 +1525,9 @@ public class WfmFlowAutomationManager {
             LinearLayout navRow = new LinearLayout(activity);
             navRow.setOrientation(LinearLayout.HORIZONTAL);
             Button btnLoginFlow = createSmallButton(activity, "🔑 Buka Sesi FLOW", "#111827");
-            navRow.addView(btnLoginFlow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            Button btnCheckUpdate = createSmallButton(activity, "🔄 Cek Update", "#059669");
+            navRow.addView(btnLoginFlow, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            navRow.addView(btnCheckUpdate, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             container.addView(navRow);
 
             addSectionHeader(container, activity, "🧪 Test Manual Cari WONUM / SC di FLOW");
@@ -1569,6 +1571,11 @@ public class WfmFlowAutomationManager {
                 saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString(), etTechMapping.getText().toString());
                 dialog.dismiss();
                 openSessionHelperDialog(activity, FLOW_WORKORDER_URL, "🔑 Sesi Login FLOW Telkom Akses");
+            });
+
+            btnCheckUpdate.setOnClickListener(v -> {
+                dialog.dismiss();
+                GitHubAutoUpdater.checkForUpdates(activity, true);
             });
 
             dialog.setOnShowListener(dlg -> {

@@ -16,6 +16,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Self-Update APK Installation Permission (Android 8+) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Legacy Storage Permissions strictly bounded by maxSdkVersion for Google Play compliance -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"

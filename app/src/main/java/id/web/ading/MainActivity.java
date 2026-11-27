@@ -89,6 +89,7 @@ public class MainActivity extends AppCompatActivity {
         setupBackNavigation();
         setupWebView();
         checkNotificationPermission();
+        GitHubAutoUpdater.checkForUpdates(this, false);
 
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState);
