@@ -1,3 +1,4 @@
+const RAILWAY_WFM_STANDALONE_URL = "https://bot-production-a5484be7.up.railway.app/api/wfm/dispatch";
 const RAILWAY_BRIDGE_URL = "https://bot-production-a5484be7.up.railway.app/api/ading/dispatch";
 
 const DEFAULT_CONFIG = {
@@ -59,38 +60,40 @@ async function startDispatchFlow(payload, adingTabId, adingWinId) {
     : payload.nama_tim || "Teknisi";
 
   if (!wonum) {
-    notifyAdingTab(adingTabId, "WONUM tidak ditemukan", `Order ${noSc} tidak memiliki WONUM untuk dibuka di FLOW.`, "error");
+    notifyAdingTab(adingTabId, "WONUM tidak ditemukan", `Order ${noSc} tidak memiliki WONUM untuk diproses di FLOW.`, "error");
     return;
   }
 
-  notifyAdingTab(adingTabId, `Memproses ${wonum}`, `Membuka FLOW & mengambil SS HD untuk ${techDisplay}...`, "info");
+  notifyAdingTab(adingTabId, `Memproses ${wonum} (Standalone)`, `Server Railway sedang mengambil SS HD FLOW & mengirim ke channel ${techDisplay}...`, "info");
 
-  const targetUrl = `https://flow.telkomakses.co.id/EditWorkorder/${encodeURIComponent(wonum)}`;
   try {
-    const existingFlowTabs = await chrome.tabs.query({ url: "https://flow.telkomakses.co.id/*" });
-    let flowTab;
-    if (existingFlowTabs.length > 0) {
-      flowTab = existingFlowTabs[0];
-      await chrome.tabs.update(flowTab.id, { url: targetUrl, active: true });
-    } else {
-      flowTab = await chrome.tabs.create({ url: targetUrl, active: true, windowId: adingWinId || undefined });
+    const cfg = await getConfig();
+    const resp = await fetch(RAILWAY_WFM_STANDALONE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        wonum,
+        leader_name: payload.leader_name || "",
+        leader_nik: payload.leader_nik || "",
+        nama_tim: payload.nama_tim || "",
+        caption: (payload.copied_text || "").trim(),
+        fallback_chat_id: cfg.fallbackChatId || "217411824",
+      }),
+    });
+    const res = await resp.json().catch(() => null);
+    if (resp.ok && res && res.ok) {
+      const targetLabel = (res.matched_titles || []).join(", ") || techDisplay;
+      if (res.fallback) {
+        notifyAdingTab(adingTabId, `⚠️ Dialihkan ke Chat Pribadi`, `Channel ${techDisplay} belum ditemukan. SS HD ${wonum} dikirim ke chat pribadi Anda.`, "info");
+      } else {
+        notifyAdingTab(adingTabId, `✅ Terkirim ke Channel`, `SS HD ${wonum} + Data Unmasked otomatis terkirim ke ${targetLabel}!`, "success");
+      }
+      return;
     }
-
-    const pending = {
-      payload,
-      adingTabId,
-      adingWinId,
-      flowTabId: flowTab.id,
-      targetUrl,
-      techDisplay,
-      wonum,
-      startedAt: Date.now(),
-      processingCapture: false,
-      warnedLogin: false,
-    };
-    await chrome.storage.session.set({ pendingDispatch: pending });
+    const errMsg = res && res.error ? res.error : `HTTP ${resp.status}`;
+    notifyAdingTab(adingTabId, `❌ Gagal WFM Standalone`, `${wonum}: ${errMsg}`, "error");
   } catch (err) {
-    notifyAdingTab(adingTabId, "Error Membuka FLOW", String(err && err.message ? err.message : err), "error");
+    notifyAdingTab(adingTabId, "Error Koneksi Railway", String(err && err.message ? err.message : err), "error");
   }
 }
 
