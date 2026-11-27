@@ -36,6 +36,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -811,9 +812,16 @@ public class WfmFlowAutomationManager {
                 }
 
                 @Override
-                public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                    super.onReceivedError(view, errorCode, description, failingUrl);
-                    if (failingUrl == null || failingUrl.equals("about:blank") || isFinished[0]) return;
+                public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                    super.onReceivedError(view, request, error);
+                    if (request == null || !request.isForMainFrame() || isFinished[0]) return;
+                    String failingUrl = request.getUrl() != null ? request.getUrl().toString() : "";
+                    if (failingUrl.isEmpty() || failingUrl.equals("about:blank")) return;
+                    int errorCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && error != null ? error.getErrorCode() : 0;
+                    String description = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && error != null && error.getDescription() != null
+                            ? error.getDescription().toString() : "Error";
+                    // Ignore ERR_ABORTED (-1) which fires normally when JS redirects during page load
+                    if (errorCode == WebViewClient.ERROR_UNKNOWN || description.contains("ERR_ABORTED")) return;
                     String targetWeb = failingUrl.contains("flow.telkomakses") ? "FLOW Telkom Akses" : "Web Server";
                     handlePipelineFailure(activity, targetWeb, "Koneksi ke " + targetWeb + " terputus: " + description + " (Kode " + errorCode + "). Periksa jaringan Anda.", cleanup);
                 }
@@ -1367,10 +1375,12 @@ public class WfmFlowAutomationManager {
                             "  inp.dispatchEvent(new Event('change', {bubbles:true}));" +
                             "  if(window.Swal){" +
                             "    var origSwal = window.Swal.fire;" +
-                            "    window.Swal.fire = function(arg){" +
-                            "      var isErr = arg && (arg.icon === 'error' || String(arg.text || arg.title || '').toLowerCase().indexOf('salah') !== -1 || String(arg.text || arg.title || '').toLowerCase().indexOf('invalid') !== -1);" +
-                            "      var isSuccess = arg && (arg.icon === 'success' || String(arg.text || arg.title || '').toLowerCase().indexOf('berhasil') !== -1 || String(arg.text || arg.title || '').toLowerCase().indexOf('success') !== -1);" +
-                            "      if(isSuccess){ setTimeout(function(){ window.location.href = '" + safePostOtpUrl + "'; }, 250); }" +
+                            "    window.Swal.fire = function(){" +
+                            "      var allTxt = '';" +
+                            "      try{ allTxt = Array.prototype.slice.call(arguments).map(function(x){ return typeof x === 'object' ? JSON.stringify(x) : String(x); }).join(' ').toLowerCase(); }catch(e){}" +
+                            "      var isErr = allTxt.indexOf('error') !== -1 || allTxt.indexOf('salah') !== -1 || allTxt.indexOf('invalid') !== -1 || allTxt.indexOf('expired') !== -1 || allTxt.indexOf('gagal') !== -1;" +
+                            "      var isSuccess = !isErr && (allTxt.indexOf('success') !== -1 || allTxt.indexOf('berhasil') !== -1 || allTxt.indexOf('valid') !== -1);" +
+                            "      if(isSuccess){ setTimeout(function(){ window.location.href = '" + safePostOtpUrl + "'; }, 400); }" +
                             "      else if(isErr){ window.__adingOtpSubmitted = false; }" +
                             "      return origSwal.apply(this, arguments);" +
                             "    };" +
