@@ -457,10 +457,11 @@ public class WfmFlowAutomationManager {
                     ? (leaderName + (!leaderNik.isEmpty() ? " (" + leaderNik + ")" : ""))
                     : (!namaTim.isEmpty() ? namaTim : "Teknisi");
 
-            Toast.makeText(activity, "⚡ Memproses di background: FLOW WFM (" + noSc + ")", Toast.LENGTH_SHORT).show();
+            String displayTarget = (initialWonum != null && !initialWonum.trim().isEmpty()) ? initialWonum.trim() : noSc;
+            Toast.makeText(activity, "⚡ Memproses di background: FLOW WFM (" + displayTarget + ")", Toast.LENGTH_SHORT).show();
             updateProgressNotification(
                     activity,
-                    "⚡ Dispatch Order: " + noSc,
+                    "⚡ Dispatch Order: " + displayTarget,
                     "Membuka FLOW Telkom Akses → " + techDisplay,
                     true
             );
@@ -622,6 +623,9 @@ public class WfmFlowAutomationManager {
 
                     if (url.contains("flow.telkomakses.co.id")) {
                         injectDesktopViewport(view);
+                        if (url.contains("/unauthorize")) {
+                            view.loadUrl(FLOW_LOGIN_URL);
+                        }
                     }
                 }
             });
@@ -851,8 +855,8 @@ public class WfmFlowAutomationManager {
                     "  return 'READY_FOR_OTP';" +
                     "}" +
 
-                    // 4. CHECK IF LOGIN WAS SUBMITTED & USERNAME SET -> IMMEDIATELY JUMP TO /otp
-                    "if(localStorage.getItem('username') && path.indexOf('/otp') === -1){" +
+                    // 4. CHECK IF LOGIN WAS SUBMITTED & USERNAME SET (ONLY ON LOGIN PAGE & NO MENUS YET) -> JUMP TO /otp
+                    "if((path === '/' || path === '/login') && localStorage.getItem('username') && !localStorage.getItem('menus')){" +
                     "  window.location.href = '/otp';" +
                     "  return 'NAVIGATING_TO_OTP';" +
                     "}" +
@@ -914,7 +918,19 @@ public class WfmFlowAutomationManager {
                     "return 'WAITING';" +
                     "})();";
 
+            final boolean[] callbackFired = {false};
+            Runnable evalWatchdog = () -> {
+                if (!callbackFired[0] && !isFinished[0] && !flowSsCaptured[0]) {
+                    callbackFired[0] = true;
+                    runFlowPipelineFastLoop(view, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
+                }
+            };
+            mainHandler.postDelayed(evalWatchdog, 2500);
+
             view.evaluateJavascript(js, result -> {
+                if (callbackFired[0]) return;
+                callbackFired[0] = true;
+                mainHandler.removeCallbacks(evalWatchdog);
                 String res = result != null ? result.replace("\"", "") : "";
                 String labelKey = (targetWonum != null && !targetWonum.isEmpty()) ? targetWonum : noSc;
                 if (res.startsWith("LOGIN_WRONG_PASSWORD")) {
@@ -925,14 +941,18 @@ public class WfmFlowAutomationManager {
                             cleanup
                     );
                     return;
+                } else if (res.startsWith("NAVIGATING_TO_ROOT")) {
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔐 Sesi FLOW belum aktif, membuka halaman login...", true);
                 } else if (res.startsWith("SUBMITTED_LOGIN")) {
                     updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔐 [1/2] Mengirim login FLOW (" + flowUser + ")...", true);
+                } else if (res.startsWith("NAVIGATING_TO_OTP")) {
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "📲 Menuju halaman verifikasi OTP FLOW...", true);
                 } else if (res.startsWith("READY_FOR_OTP")) {
                     isWaitingForOtp[0] = true;
                     updateProgressNotification(activity, "📲 Masukkan OTP FLOW", "Buka dialog untuk verifikasi OTP", true);
                     showOtpInputDialog(activity, view, noSc, targetWonum, isWaitingForOtp, cleanup);
-                } else if (res.startsWith("NAVIGATING_TO_WONUM")) {
-                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔍 [1/2] Membuka langsung Workorder " + targetWonum + "...", true);
+                } else if (res.startsWith("NAVIGATING_TO_WONUM") || res.startsWith("REDIRECT_TO_WORKORDER")) {
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔍 [1/2] Membuka langsung Workorder " + labelKey + "...", true);
                 } else if (res.startsWith("OPENED_FILTER_MODAL")) {
                     updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔍 [1/2] Membuka Filter Search Workorder Fulfillment...", true);
                 } else if (res.startsWith("APPLIED_SC_FILTER")) {
