@@ -100,43 +100,28 @@ public class WfmFlowAutomationManager {
 
 
     /**
-     * Persists FLOW session cookies into SharedPreferences
+     * Flushes WebView CookieManager to disk so FLOW session & Remember Me cookies persist natively
+     * across dispatches and app restarts without corrupting HttpOnly/Expires attributes.
      */
     public static void persistCookies(Context context) {
         if (context == null) return;
         try {
             CookieManager cm = CookieManager.getInstance();
+            cm.setAcceptCookie(true);
             cm.flush();
-            String flowCookies = cm.getCookie("https://flow.telkomakses.co.id");
-            SharedPreferences.Editor editor = getPrefs(context).edit();
-            if (flowCookies != null && !flowCookies.isEmpty()) {
-                editor.putString(KEY_FLOW_COOKIES, flowCookies);
-            }
-            editor.apply();
         } catch (Exception ignored) {
         }
     }
 
     /**
-     * Restores FLOW cookies from SharedPreferences into CookieManager
+     * Ensures CookieManager is enabled so Android WebView uses its native persistent cookie store.
+     * Does NOT overwrite HttpOnly/Remember-Me cookies with stripped values.
      */
     public static void restoreCookies(Context context) {
         if (context == null) return;
         try {
             CookieManager cm = CookieManager.getInstance();
             cm.setAcceptCookie(true);
-            SharedPreferences prefs = getPrefs(context);
-            String flowCookies = prefs.getString(KEY_FLOW_COOKIES, "");
-            if (!flowCookies.isEmpty()) {
-                String[] parts = flowCookies.split(";");
-                for (String p : parts) {
-                    String cookie = p.trim();
-                    if (!cookie.isEmpty()) {
-                        cm.setCookie("https://flow.telkomakses.co.id", cookie + "; path=/; secure; samesite=lax");
-                    }
-                }
-            }
-            cm.flush();
         } catch (Exception ignored) {
         }
     }
@@ -756,10 +741,13 @@ public class WfmFlowAutomationManager {
                     "    else if(!woDetailVal && (aiv.toUpperCase().indexOf('WO0') !== -1 || (aiv.toUpperCase().indexOf('WO') === 0 && aiv.length >= 8))){ woDetailVal = aiv; }" +
                     "  }" +
                     "}" +
-                    "var isWoCardMatch = targetWoUpper ? (woDetailVal && woDetailVal.toUpperCase().indexOf(targetWoUpper) !== -1) : (scDetailVal && scDetailVal.toLowerCase().indexOf(targetLower) !== -1 && woDetailVal && woDetailVal.toUpperCase().indexOf('WO') !== -1);" +
+                    "var bodyTxt = (document.body && document.body.innerText) ? document.body.innerText : '';" +
+                    "var onEditWoPage = path.toLowerCase().indexOf('/editworkorder/') !== -1;" +
+                    "var hasWoCardLabels = bodyTxt.indexOf('OSS Order ID') !== -1 || bodyTxt.indexOf('Service Number') !== -1 || bodyTxt.indexOf('Customer Name') !== -1;" +
+                    "var isWoCardMatch = (onEditWoPage && hasWoCardLabels) || (targetWoUpper ? (woDetailVal && woDetailVal.toUpperCase().indexOf(targetWoUpper) !== -1) : (scDetailVal && scDetailVal.toLowerCase().indexOf(targetLower) !== -1 && woDetailVal && woDetailVal.toUpperCase().indexOf('WO') !== -1));" +
                     "if(isWoCardMatch){" +
                     "  document.querySelectorAll('.modal.show, .modal-backdrop').forEach(function(m){ m.style.display='none'; });" +
-                    "  return 'DETAIL_CARD_READY:' + woDetailVal;" +
+                    "  return 'DETAIL_CARD_READY:' + (woDetailVal || targetWo);" +
                     "}" +
 
                     // 1B. DIRECT NAVIGATE BY WONUM VIA /EditWorkorder/<WONUM> WHEN LOGGED IN
@@ -1108,8 +1096,9 @@ public class WfmFlowAutomationManager {
                             "    var origSwal = window.Swal.fire;" +
                             "    window.Swal.fire = function(arg){" +
                             "      var isErr = arg && (arg.icon === 'error' || String(arg.text || arg.title || '').toLowerCase().indexOf('salah') !== -1 || String(arg.text || arg.title || '').toLowerCase().indexOf('invalid') !== -1);" +
-                            "      if(!isErr){ setTimeout(function(){ window.location.href = '" + safePostOtpUrl + "'; }, 200); }" +
-                            "      else { window.__adingOtpSubmitted = false; }" +
+                            "      var isSuccess = arg && (arg.icon === 'success' || String(arg.text || arg.title || '').toLowerCase().indexOf('berhasil') !== -1 || String(arg.text || arg.title || '').toLowerCase().indexOf('success') !== -1);" +
+                            "      if(isSuccess){ setTimeout(function(){ window.location.href = '" + safePostOtpUrl + "'; }, 250); }" +
+                            "      else if(isErr){ window.__adingOtpSubmitted = false; }" +
                             "      return origSwal.apply(this, arguments);" +
                             "    };" +
                             "  }" +
