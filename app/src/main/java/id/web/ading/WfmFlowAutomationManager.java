@@ -19,12 +19,15 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.util.Base64;
 import android.view.Gravity;
@@ -1169,67 +1172,119 @@ public class WfmFlowAutomationManager {
                 root.setOrientation(LinearLayout.VERTICAL);
                 int pad = dp(activity, 20);
                 root.setPadding(pad, pad, pad, pad);
-                root.setBackgroundColor(Color.WHITE);
 
-                // ADING Header with red accent pill
-                LinearLayout headerRow = new LinearLayout(activity);
-                headerRow.setOrientation(LinearLayout.HORIZONTAL);
-                headerRow.setGravity(Gravity.CENTER_VERTICAL);
+                // ADING White Rounded Card (#FFFFFF, 16dp radius, 1dp #E5E7EB border)
+                GradientDrawable cardBg = new GradientDrawable();
+                cardBg.setColor(Color.WHITE);
+                cardBg.setCornerRadius(dp(activity, 16));
+                cardBg.setStroke(dp(activity, 1), Color.parseColor("#E5E7EB"));
+                root.setBackground(cardBg);
 
-                View accentPill = new View(activity);
-                accentPill.setBackgroundColor(Color.parseColor("#F9010F"));
-                LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(dp(activity, 4), dp(activity, 22));
-                pillLp.setMargins(0, 0, dp(activity, 10), 0);
-                accentPill.setLayoutParams(pillLp);
-                headerRow.addView(accentPill);
+                // ADING Pill Badge (Soft Indigo #EEF2FF with Navy #1E3A8A text)
+                TextView tvBadge = new TextView(activity);
+                tvBadge.setText("ADING • WFM FLOW");
+                tvBadge.setTextSize(10.5f);
+                tvBadge.setTypeface(null, Typeface.BOLD);
+                tvBadge.setTextColor(Color.parseColor("#1E3A8A"));
+                GradientDrawable badgeBg = new GradientDrawable();
+                badgeBg.setColor(Color.parseColor("#EEF2FF"));
+                badgeBg.setCornerRadius(dp(activity, 20));
+                tvBadge.setBackground(badgeBg);
+                tvBadge.setPadding(dp(activity, 10), dp(activity, 4), dp(activity, 10), dp(activity, 4));
+                LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                badgeLp.setMargins(0, 0, 0, dp(activity, 10));
+                tvBadge.setLayoutParams(badgeLp);
+                root.addView(tvBadge);
 
                 TextView tvTitle = new TextView(activity);
-                tvTitle.setText("Verifikasi OTP FLOW Telkom");
-                tvTitle.setTextSize(16f);
+                tvTitle.setText("Verifikasi OTP FLOW");
+                tvTitle.setTextSize(17f);
                 tvTitle.setTypeface(null, Typeface.BOLD);
                 tvTitle.setTextColor(Color.parseColor("#111827"));
-                headerRow.addView(tvTitle);
-                root.addView(headerRow);
+                root.addView(tvTitle);
 
                 TextView tvMsg = new TextView(activity);
-                tvMsg.setText("Kode OTP telah dikirimkan oleh sistem FLOW ke Telegram Anda.\nMasukkan 6 digit kode OTP:");
+                tvMsg.setText("Masukkan 6 digit kode OTP yang dikirimkan ke Telegram Anda untuk melanjutkan pengambilan SS Workorder.");
                 tvMsg.setTextSize(13f);
-                tvMsg.setTextColor(Color.parseColor("#4B5563"));
-                tvMsg.setPadding(0, dp(activity, 12), 0, dp(activity, 14));
+                tvMsg.setTextColor(Color.parseColor("#6B7280"));
+                tvMsg.setLineSpacing(dp(activity, 2), 1f);
+                tvMsg.setPadding(0, dp(activity, 6), 0, dp(activity, 16));
                 root.addView(tvMsg);
 
+                // ADING Input Label
+                TextView tvOtpLabel = new TextView(activity);
+                tvOtpLabel.setText("KODE OTP");
+                tvOtpLabel.setTextSize(11f);
+                tvOtpLabel.setTypeface(null, Typeface.BOLD);
+                tvOtpLabel.setTextColor(Color.parseColor("#6B7280"));
+                tvOtpLabel.setPadding(0, 0, 0, dp(activity, 6));
+                root.addView(tvOtpLabel);
+
+                // ADING Rounded Input Field (#F9FAFB fill, 12dp radius, 1dp #D1D5DB border)
                 final EditText etOtp = new EditText(activity);
                 etOtp.setInputType(InputType.TYPE_CLASS_NUMBER);
-                etOtp.setHint("123456");
-                etOtp.setTextSize(26f);
+                etOtp.setFilters(new InputFilter[]{new InputFilter.LengthFilter(6)});
+                etOtp.setHint("• • • • • •");
+                etOtp.setHintTextColor(Color.parseColor("#9CA3AF"));
+                etOtp.setTextSize(24f);
                 etOtp.setTypeface(null, Typeface.BOLD);
-                etOtp.setTextColor(Color.parseColor("#F9010F"));
+                etOtp.setTextColor(Color.parseColor("#111827"));
+                etOtp.setLetterSpacing(0.25f);
                 etOtp.setGravity(Gravity.CENTER);
-                etOtp.setBackgroundColor(Color.parseColor("#F3F4F6"));
+                GradientDrawable inputBg = new GradientDrawable();
+                inputBg.setColor(Color.parseColor("#F9FAFB"));
+                inputBg.setCornerRadius(dp(activity, 12));
+                inputBg.setStroke(dp(activity, 1), Color.parseColor("#D1D5DB"));
+                etOtp.setBackground(inputBg);
                 etOtp.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
                 root.addView(etOtp);
+
+                // Subtle Divider (#F3F4F6)
+                View divider = new View(activity);
+                divider.setBackgroundColor(Color.parseColor("#F3F4F6"));
+                LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 1));
+                divLp.setMargins(0, dp(activity, 18), 0, dp(activity, 14));
+                divider.setLayoutParams(divLp);
+                root.addView(divider);
 
                 LinearLayout btnRow = new LinearLayout(activity);
                 btnRow.setOrientation(LinearLayout.HORIZONTAL);
                 btnRow.setGravity(Gravity.END);
-                btnRow.setPadding(0, dp(activity, 18), 0, 0);
 
+                // ADING Secondary Outlined Button (matching Redispatch / View / Salin)
                 Button btnCancel = new Button(activity);
                 btnCancel.setText("Batal");
-                btnCancel.setTextColor(Color.parseColor("#4B5563"));
-                btnCancel.setBackgroundColor(Color.parseColor("#F3F4F6"));
+                btnCancel.setTextSize(13.5f);
+                btnCancel.setTypeface(null, Typeface.BOLD);
+                btnCancel.setTextColor(Color.parseColor("#374151"));
                 btnCancel.setAllCaps(false);
+                GradientDrawable cancelBg = new GradientDrawable();
+                cancelBg.setColor(Color.WHITE);
+                cancelBg.setCornerRadius(dp(activity, 10));
+                cancelBg.setStroke(dp(activity, 1), Color.parseColor("#D1D5DB"));
+                btnCancel.setBackground(cancelBg);
+                btnCancel.setPadding(dp(activity, 18), dp(activity, 10), dp(activity, 18), dp(activity, 10));
+                btnCancel.setMinHeight(0);
+                btnCancel.setMinimumHeight(dp(activity, 42));
                 LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                cancelLp.setMargins(0, 0, dp(activity, 8), 0);
+                cancelLp.setMargins(0, 0, dp(activity, 10), 0);
                 btnCancel.setLayoutParams(cancelLp);
                 btnRow.addView(btnCancel);
 
+                // ADING Primary Submit Button (Navy Blue #1E3A8A, 10dp radius, matching ADING Submit)
                 Button btnSubmit = new Button(activity);
-                btnSubmit.setText("✅ Verifikasi & Lanjut");
+                btnSubmit.setText("Submit");
+                btnSubmit.setTextSize(13.5f);
                 btnSubmit.setTextColor(Color.WHITE);
-                btnSubmit.setBackgroundColor(Color.parseColor("#F9010F"));
                 btnSubmit.setAllCaps(false);
                 btnSubmit.setTypeface(null, Typeface.BOLD);
+                GradientDrawable submitBg = new GradientDrawable();
+                submitBg.setColor(Color.parseColor("#1E3A8A"));
+                submitBg.setCornerRadius(dp(activity, 10));
+                btnSubmit.setBackground(submitBg);
+                btnSubmit.setPadding(dp(activity, 24), dp(activity, 10), dp(activity, 24), dp(activity, 10));
+                btnSubmit.setMinHeight(0);
+                btnSubmit.setMinimumHeight(dp(activity, 42));
                 btnRow.addView(btnSubmit);
 
                 root.addView(btnRow);
@@ -1238,6 +1293,9 @@ public class WfmFlowAutomationManager {
                 builder.setCancelable(false);
 
                 AlertDialog dialog = builder.create();
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+                }
 
                 btnCancel.setOnClickListener(v -> {
                     dialog.dismiss();
