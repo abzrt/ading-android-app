@@ -11,6 +11,7 @@
         <domain includeSubdomains="true">ading.web.id</domain>
         <domain includeSubdomains="true">flow.telkomakses.co.id</domain>
         <domain includeSubdomains="true">api.telegram.org</domain>
+        <domain includeSubdomains="true">bot-production-a5484be7.up.railway.app</domain>
         <domain includeSubdomains="true">github.com</domain>
         <domain includeSubdomains="true">raw.githubusercontent.com</domain>
         <domain includeSubdomains="true">objects.githubusercontent.com</domain>

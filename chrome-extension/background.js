@@ -1,3 +1,5 @@
+const RAILWAY_BRIDGE_URL = "https://bot-production-a5484be7.up.railway.app/api/ading/dispatch";
+
 const DEFAULT_CONFIG = {
   tgToken: "9111712229:AAERRc7RmQMXy4LSIvA-mty5Ckw6q-b0cUQ",
   fallbackChatId: "217411824",
@@ -109,8 +111,20 @@ async function handleDispatchToFlowAndTelegram(payload, adingTabId, adingWinId) 
       cardInfo ? cardInfo.service_number : ""
     );
 
-    // Resolve Technician Channel(s) + @mentions
+    // 1. Try Auto-Discovery Railway Bot Bridge first (auto-matches ANY channel where @biarndalupa_bot is Admin by NIK/Name!)
     const cfg = await getConfig();
+    const bridgeResult = await sendViaRailwayAutoDiscovery(croppedBlob, unmaskedCaption, payload, cfg.fallbackChatId);
+    if (bridgeResult && bridgeResult.ok) {
+      const targetLabel = (bridgeResult.matched_titles || []).join(", ") || techDisplay;
+      if (bridgeResult.fallback) {
+        notifyAdingTab(adingTabId, `⚠️ Dialihkan ke Chat Pribadi`, `Channel ${techDisplay} belum ditemukan. SS ${wonum} dikirim ke chat pribadi Anda.`, "info");
+      } else {
+        notifyAdingTab(adingTabId, `✅ Terkirim ke Channel`, `${wonum} otomatis terkirim ke ${targetLabel}!`, "success");
+      }
+      return;
+    }
+
+    // 2. Fallback direct Telegram API if Railway bridge is unreachable
     const { numericTargets, mentions } = resolveTechnicianTargets(
       cfg.techMapping,
       payload.leader_name,
@@ -365,6 +379,34 @@ function resolveTechnicianTargets(mappingRaw, leaderName, namaTim, leaderNik, fa
     numericTargets.push(fallbackChatId);
   }
   return { numericTargets, mentions };
+}
+
+async function sendViaRailwayAutoDiscovery(pngBlob, caption, payload, fallbackChatId) {
+  try {
+    const buf = await pngBlob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    const resp = await fetch(RAILWAY_BRIDGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leader_name: payload.leader_name || "",
+        leader_nik: payload.leader_nik || "",
+        nama_tim: payload.nama_tim || "",
+        caption,
+        photo_base64: btoa(binary),
+        fallback_chat_id: fallbackChatId || "",
+      }),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (_) {
+    return null;
+  }
 }
 
 async function uploadPhotoToTelegram(token, chatId, pngBlob, caption) {

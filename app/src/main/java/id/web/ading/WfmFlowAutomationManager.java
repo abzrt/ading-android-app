@@ -80,6 +80,7 @@ public class WfmFlowAutomationManager {
     public static final String DEFAULT_FLOW_PASS = "narindo1";
     public static final String DEFAULT_TG_TOKEN = "9111712229:AAERRc7RmQMXy4LSIvA-mty5Ckw6q-b0cUQ";
     public static final String DEFAULT_TG_CHAT_ID = "217411824";
+    public static final String RAILWAY_BRIDGE_URL = "https://bot-production-a5484be7.up.railway.app/api/ading/dispatch";
     public static final String DEFAULT_TECH_MAPPING =
             "ARIFIN=-1002202217652,@Mimpi_bergadang\n" +
             "MUHAMMAD RISQI=-1002165761538\n" +
@@ -747,17 +748,28 @@ public class WfmFlowAutomationManager {
                         );
                         Toast.makeText(activity, "📤 Mengirim SS WFM & Data ke Telegram (" + techDisplay + ")...", Toast.LENGTH_SHORT).show();
                         tgExecutor.execute(() -> {
+                            // 1. Try Auto-Discovery Railway Bot Bridge first (auto-matches ANY channel where @biarndalupa_bot is Admin by NIK/Name!)
+                            String bridgeTarget = sendPhotoViaRailwayAutoDiscovery(photoCopy, finalCaption, leaderName, leaderNik, namaTim, fallbackChatId);
                             int sentCount = 0;
-                            for (String cid : numericTargets) {
-                                String useThread = cid.equals(fallbackChatId) ? tgThreadId : "";
-                                if (uploadPhotoToTelegram(tgToken, cid, useThread, photoCopy, captionWithMention)) {
-                                    sentCount++;
-                                }
-                            }
                             boolean fallbackSent = false;
-                            if (sentCount == 0 && !fallbackChatId.isEmpty() && !numericTargets.contains(fallbackChatId)) {
-                                String fbCaption = "⚠️ Gagal kirim ke channel " + techDisplay + " (pastikan @biarndalupa_bot jadi Admin channel).\n\n" + captionWithMention;
-                                fallbackSent = uploadPhotoToTelegram(tgToken, fallbackChatId, tgThreadId, photoCopy, fbCaption);
+                            if (bridgeTarget != null) {
+                                if ("FALLBACK".equals(bridgeTarget)) {
+                                    fallbackSent = true;
+                                } else {
+                                    sentCount = 1;
+                                }
+                            } else {
+                                // 2. Fallback direct Telegram API if Railway bridge is unreachable
+                                for (String cid : numericTargets) {
+                                    String useThread = cid.equals(fallbackChatId) ? tgThreadId : "";
+                                    if (uploadPhotoToTelegram(tgToken, cid, useThread, photoCopy, captionWithMention)) {
+                                        sentCount++;
+                                    }
+                                }
+                                if (sentCount == 0 && !fallbackChatId.isEmpty() && !numericTargets.contains(fallbackChatId)) {
+                                    String fbCaption = "⚠️ Gagal kirim ke channel " + techDisplay + " (pastikan @biarndalupa_bot jadi Admin channel).\n\n" + captionWithMention;
+                                    fallbackSent = uploadPhotoToTelegram(tgToken, fallbackChatId, tgThreadId, photoCopy, fbCaption);
+                                }
                             }
                             if (photoCopy != null && !photoCopy.isRecycled()) {
                                 photoCopy.recycle();
@@ -1939,6 +1951,62 @@ public class WfmFlowAutomationManager {
 
     private static String nonEmptyOrDash(String v) {
         return (v != null && !v.trim().isEmpty()) ? v.trim() : "-";
+    }
+
+    private static String sendPhotoViaRailwayAutoDiscovery(
+            Bitmap bitmap,
+            String caption,
+            String leaderName,
+            String leaderNik,
+            String namaTim,
+            String fallbackChatId
+    ) {
+        HttpURLConnection conn = null;
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
+            String photoB64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+
+            JSONObject body = new JSONObject();
+            body.put("leader_name", leaderName != null ? leaderName : "");
+            body.put("leader_nik", leaderNik != null ? leaderNik : "");
+            body.put("nama_tim", namaTim != null ? namaTim : "");
+            body.put("caption", caption != null ? caption : "");
+            body.put("photo_base64", photoB64);
+            body.put("fallback_chat_id", fallbackChatId != null ? fallbackChatId : "");
+
+            URL url = new URL(RAILWAY_BRIDGE_URL);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(12000);
+            conn.setReadTimeout(25000);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+            byte[] payloadBytes = body.toString().getBytes(StandardCharsets.UTF_8);
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(payloadBytes);
+                out.flush();
+            }
+
+            int code = conn.getResponseCode();
+            if (code >= 200 && code < 300) {
+                java.io.InputStream is = conn.getInputStream();
+                ByteArrayOutputStream respBuf = new ByteArrayOutputStream();
+                byte[] buf = new byte[2048];
+                int n;
+                while ((n = is.read(buf)) != -1) respBuf.write(buf, 0, n);
+                JSONObject resJson = new JSONObject(respBuf.toString("UTF-8"));
+                if (resJson.optBoolean("ok", false)) {
+                    return resJson.optBoolean("fallback", false) ? "FALLBACK" : "CHANNEL";
+                }
+            }
+            return null;
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
 
     private static boolean uploadPhotoToTelegram(String token, String chatId, String threadId, Bitmap bitmap, String caption) {

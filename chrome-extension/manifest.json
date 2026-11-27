@@ -11,7 +11,8 @@
   "host_permissions": [
     "https://ading.web.id/*",
     "https://flow.telkomakses.co.id/*",
-    "https://api.telegram.org/*"
+    "https://api.telegram.org/*",
+    "https://bot-production-a5484be7.up.railway.app/*"
   ],
   "background": {
     "service_worker": "background.js"
