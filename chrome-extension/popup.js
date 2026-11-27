@@ -30,6 +30,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   document.getElementById("btnFlow").addEventListener("click", () => {
-    chrome.tabs.create({ url: "https://flow.telkomakses.co.id/workorder" });
+    chrome.tabs.create({ url: "https://flow.telkomakses.co.id/" });
   });
 });
