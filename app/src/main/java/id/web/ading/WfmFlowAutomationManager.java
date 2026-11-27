@@ -577,8 +577,9 @@ public class WfmFlowAutomationManager {
             if (root == null) return;
 
             final long runId = ++sActiveRunId;
-            int bgWidth = 1366;
-            int bgHeight = 950;
+            // Render at high-DPI 2400x1500 (~1.76x Retina scale of 1366px desktop) for razor-sharp HD screenshots
+            int bgWidth = 2400;
+            int bgHeight = 1500;
             FrameLayout bgContainer;
             WebView bgWebView;
             View oldBg = root.findViewWithTag("TAG_WFM_BG_CONTAINER");
@@ -619,7 +620,7 @@ public class WfmFlowAutomationManager {
                 settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
 
                 float density = activity.getResources().getDisplayMetrics().density;
-                int desktopScale = Math.max(20, Math.round(100f / Math.max(1f, density)));
+                int desktopScale = Math.max(30, Math.round((100f * bgWidth) / (1366f * Math.max(1f, density))));
                 bgWebView.setInitialScale(desktopScale);
 
                 CookieManager cm = CookieManager.getInstance();
@@ -1454,14 +1455,14 @@ public class WfmFlowAutomationManager {
                 "    else if(prodLblEl.parentElement && prodLblEl.parentElement.nextElementSibling){" +
                 "      prodBottom = Math.max(prodBottom, prodLblEl.parentElement.nextElementSibling.getBoundingClientRect().bottom);" +
                 "    }" +
-                "    botY = prodBottom + 12;" +
+                "    botY = prodBottom + 18;" +
                 "  }" +
                 "  if(schedEl){" +
                 "    var schedTop = schedEl.getBoundingClientRect().top - 10;" +
                 "    if(schedTop > topY + 180){ botY = prodLblEl ? Math.min(botY, schedTop) : schedTop; }" +
                 "  }" +
-                "  var leftX = Math.max(0, br.left - 12);" +
-                "  var rightX = Math.min(window.innerWidth, br.right + 12);" +
+                "  var leftX = Math.max(0, br.left - 16);" +
+                "  var rightX = Math.min(window.innerWidth, br.right + 16);" +
                 "  var cropW = Math.max(200, rightX - leftX);" +
                 "  var cropH = Math.max(200, botY - topY);" +
                 "  rectObj = {left:leftX, top:Math.max(0, topY), width:cropW, height:cropH, vw:window.innerWidth, vh:window.innerHeight};" +
@@ -1868,7 +1869,7 @@ public class WfmFlowAutomationManager {
         HttpURLConnection conn = null;
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.PNG, 95, baos);
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
             byte[] pngBytes = baos.toByteArray();
 
             String boundary = "----AdingTelegramBoundary" + System.currentTimeMillis();
