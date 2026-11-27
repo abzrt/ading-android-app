@@ -1175,35 +1175,60 @@ public class WfmFlowAutomationManager {
                 "var contact = getValByLabel('Contact Number');" +
                 "var cust = getValByLabel('Customer Name');" +
                 "var addr = getValByLabel('Service Address');" +
+                "var navs = document.querySelectorAll('nav, header, .navbar');" +
+                "for(var ni=0; ni<navs.length; ni++){ navs[ni].style.display = 'none'; }" +
                 "var formEl = document.querySelector('main form') || document.querySelector('form');" +
-                "var tabEl = null;" +
-                "var prodEl = null;" +
+                "var tabBtnEl = null;" +
+                "var redBarEl = null;" +
+                "var prodLblEl = null;" +
                 "var schedEl = null;" +
                 "var scanNodes = document.querySelectorAll('a, button, li, div, label, span, h5, h6');" +
                 "for(var j=0; j<scanNodes.length; j++){" +
                 "  var sn = scanNodes[j];" +
                 "  if(sn.children.length > 2) continue;" +
                 "  var st = (sn.innerText || '').trim();" +
-                "  if(!tabEl && st === 'Related Record'){" +
-                "    tabEl = sn.closest('ul, .nav, .nav-tabs') || sn.parentElement;" +
+                "  if(!tabBtnEl && (st === 'Related Record' || st === 'Plans')){" +
+                "    tabBtnEl = sn;" +
                 "  }" +
-                "  if(!prodEl && st.toLowerCase().indexOf('product name') !== -1){" +
-                "    prodEl = sn.closest('.row, .form-group, .mb-2, .mb-3') || sn.parentElement;" +
+                "  if(!redBarEl && st === 'Workorder'){" +
+                "    var rr = sn.getBoundingClientRect();" +
+                "    if(rr.width > 400){ redBarEl = sn; }" +
+                "  }" +
+                "  if(!prodLblEl && st.toLowerCase().indexOf('product name') === 0){" +
+                "    prodLblEl = sn;" +
                 "  }" +
                 "  if(!schedEl && st === 'Scheduling Information'){" +
                 "    schedEl = sn;" +
                 "  }" +
                 "}" +
                 "var rectObj = null;" +
-                "var anchorEl = tabEl || formEl;" +
+                "var anchorEl = tabBtnEl || redBarEl || formEl;" +
                 "if(anchorEl){" +
                 "  var absTop = anchorEl.getBoundingClientRect().top + window.scrollY;" +
-                "  window.scrollTo(0, Math.max(0, absTop - 70));" +
-                "  var fr = (formEl || anchorEl).getBoundingClientRect();" +
-                "  var topY = tabEl ? tabEl.getBoundingClientRect().top : fr.top;" +
-                "  var botY = prodEl ? (prodEl.getBoundingClientRect().bottom + 14) : (schedEl ? (schedEl.getBoundingClientRect().top - 8) : fr.bottom);" +
+                "  window.scrollTo(0, Math.max(0, absTop - 12));" +
+                "  var boxRef = redBarEl || formEl || anchorEl;" +
+                "  var br = boxRef.getBoundingClientRect();" +
+                "  var topY = tabBtnEl ? (tabBtnEl.getBoundingClientRect().top - 6) : (br.top - 6);" +
+                "  var botY = br.bottom + 420;" +
+                "  if(prodLblEl){" +
+                "    var pr = prodLblEl.getBoundingClientRect();" +
+                "    var prodBottom = pr.bottom;" +
+                "    var pSib = prodLblEl.nextElementSibling;" +
+                "    if(pSib){ prodBottom = Math.max(prodBottom, pSib.getBoundingClientRect().bottom); }" +
+                "    else if(prodLblEl.parentElement && prodLblEl.parentElement.nextElementSibling){" +
+                "      prodBottom = Math.max(prodBottom, prodLblEl.parentElement.nextElementSibling.getBoundingClientRect().bottom);" +
+                "    }" +
+                "    botY = prodBottom + 12;" +
+                "  }" +
+                "  if(schedEl){" +
+                "    var schedTop = schedEl.getBoundingClientRect().top - 10;" +
+                "    if(schedTop > topY + 180){ botY = prodLblEl ? Math.min(botY, schedTop) : schedTop; }" +
+                "  }" +
+                "  var leftX = Math.max(0, br.left - 12);" +
+                "  var rightX = Math.min(window.innerWidth, br.right + 12);" +
+                "  var cropW = Math.max(200, rightX - leftX);" +
                 "  var cropH = Math.max(200, botY - topY);" +
-                "  rectObj = {left:fr.left, top:topY, width:fr.width, height:cropH, vw:window.innerWidth, vh:window.innerHeight};" +
+                "  rectObj = {left:leftX, top:Math.max(0, topY), width:cropW, height:cropH, vw:window.innerWidth, vh:window.innerHeight};" +
                 "}" +
                 "return JSON.stringify({wo:wo, sc:sc, service_number:srv, contact_number:contact, customer_name:cust, service_address:addr, rect:rectObj});" +
                 "})();";
