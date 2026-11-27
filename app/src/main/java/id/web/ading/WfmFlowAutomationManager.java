@@ -77,10 +77,10 @@ public class WfmFlowAutomationManager {
     public static final String DEFAULT_TG_TOKEN = "9111712229:AAERRc7RmQMXy4LSIvA-mty5Ckw6q-b0cUQ";
     public static final String DEFAULT_TG_CHAT_ID = "217411824";
     public static final String DEFAULT_TECH_MAPPING =
-            "ARIFIN=-1002202217652\n" +
+            "ARIFIN=-1002202217652,@Mimpi_bergadang\n" +
             "MUHAMMAD RISQI=-1002165761538\n" +
             "AHMAD SYAHRIZAK RAMADHANI=-1002280689139\n" +
-            "ANJELLO=-1002960116555\n" +
+            "ANJELLO=-1002960116555,@embu_mamo_SK\n" +
             "ANDI MUHAMMAD RAJAB=-1003818907805\n" +
             "MUHAMMAD NAZAR ALFATH=-1004329000380\n" +
             "ALIF JUNAIDI=-1002975699950";
@@ -725,12 +725,28 @@ public class WfmFlowAutomationManager {
                                         koordinat
                                 );
                         Bitmap photoCopy = croppedBitmap.copy(croppedBitmap.getConfig() != null ? croppedBitmap.getConfig() : Bitmap.Config.ARGB_8888, false);
+                        List<String> numericTargets = new ArrayList<>();
+                        StringBuilder mentionTags = new StringBuilder();
+                        for (String entry : targetChatIds) {
+                            if (entry.startsWith("@")) {
+                                if (mentionTags.length() > 0) mentionTags.append(" ");
+                                mentionTags.append(entry);
+                            } else {
+                                numericTargets.add(entry);
+                            }
+                        }
+                        if (numericTargets.isEmpty() && !fallbackChatId.isEmpty()) {
+                            numericTargets.add(fallbackChatId);
+                        }
+                        String captionWithMention = mentionTags.length() > 0
+                                ? (finalCaption + "\n\n👷 " + mentionTags.toString())
+                                : finalCaption;
                         Toast.makeText(activity, "📤 Mengirim SS WFM & Data ke Telegram (" + techDisplay + ")...", Toast.LENGTH_SHORT).show();
                         tgExecutor.execute(() -> {
                             int sentCount = 0;
-                            for (String cid : targetChatIds) {
+                            for (String cid : numericTargets) {
                                 String useThread = cid.equals(fallbackChatId) ? tgThreadId : "";
-                                if (uploadPhotoToTelegram(tgToken, cid, useThread, photoCopy, finalCaption)) {
+                                if (uploadPhotoToTelegram(tgToken, cid, useThread, photoCopy, captionWithMention)) {
                                     sentCount++;
                                 }
                             }
@@ -738,7 +754,7 @@ public class WfmFlowAutomationManager {
                                 photoCopy.recycle();
                             }
                             final int finalSent = sentCount;
-                            final int totalTargets = targetChatIds.size();
+                            final int totalTargets = numericTargets.size();
                             mainHandler.post(() -> {
                                 if (finalSent > 0) {
                                     Toast.makeText(activity, "✅ SS WFM & Data " + (!resolvedWonum[0].isEmpty() ? resolvedWonum[0] : noSc) + " terkirim ke " + finalSent + "/" + totalTargets + " target Telegram (" + techDisplay + ")!", Toast.LENGTH_LONG).show();
