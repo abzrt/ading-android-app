@@ -577,9 +577,8 @@ public class WfmFlowAutomationManager {
             if (root == null) return;
 
             final long runId = ++sActiveRunId;
-            // Render at high-DPI 2400x1500 (~1.76x Retina scale of 1366px desktop) for razor-sharp HD screenshots
-            int bgWidth = 2400;
-            int bgHeight = 1500;
+            int bgWidth = 1366;
+            int bgHeight = 950;
             FrameLayout bgContainer;
             WebView bgWebView;
             View oldBg = root.findViewWithTag("TAG_WFM_BG_CONTAINER");
@@ -620,7 +619,7 @@ public class WfmFlowAutomationManager {
                 settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
 
                 float density = activity.getResources().getDisplayMetrics().density;
-                int desktopScale = Math.max(30, Math.round((100f * bgWidth) / (1366f * Math.max(1f, density))));
+                int desktopScale = Math.max(20, Math.round(100f / Math.max(1f, density)));
                 bgWebView.setInitialScale(desktopScale);
 
                 CookieManager cm = CookieManager.getInstance();
@@ -1522,8 +1521,10 @@ public class WfmFlowAutomationManager {
                     if (width <= 0) width = 1366;
                     if (height <= 0) height = 900;
 
-                    Bitmap fullBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                    int hdScale = 2;
+                    Bitmap fullBitmap = Bitmap.createBitmap(width * hdScale, height * hdScale, Bitmap.Config.ARGB_8888);
                     Canvas canvas = new Canvas(fullBitmap);
+                    canvas.scale(hdScale, hdScale);
                     webView.draw(canvas);
 
                     Bitmap resultBitmap = fullBitmap;
