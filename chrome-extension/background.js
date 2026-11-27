@@ -32,13 +32,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "ADING_DISPATCH_TRIGGERED" && msg.payload) {
     const adingTabId = sender.tab ? sender.tab.id : null;
     const adingWinId = sender.tab ? sender.tab.windowId : null;
-    handleDispatchToFlowAndTelegram(msg.payload, adingTabId, adingWinId);
+    startDispatchFlow(msg.payload, adingTabId, adingWinId);
     sendResponse({ ok: true });
     return true;
   }
 });
 
-async function handleDispatchToFlowAndTelegram(payload, adingTabId, adingWinId) {
+// Event-driven listener: wakes Manifest V3 Service Worker reliably even if user takes >30s to enter OTP!
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" && !changeInfo.url) return;
+  const { pendingDispatch } = await chrome.storage.session.get(["pendingDispatch"]);
+  if (!pendingDispatch || pendingDispatch.flowTabId !== tabId) return;
+  // Expire stale pending jobs older than 5 minutes
+  if (Date.now() - (pendingDispatch.startedAt || 0) > 5 * 60 * 1000) {
+    await chrome.storage.session.remove(["pendingDispatch"]);
+    return;
+  }
+  await processFlowTabState(tabId, tab, pendingDispatch);
+});
+
+async function startDispatchFlow(payload, adingTabId, adingWinId) {
   const wonum = (payload.wonum || "").trim();
   const noSc = (payload.no_sc || "").trim();
   const techDisplay = payload.leader_name
@@ -53,11 +66,9 @@ async function handleDispatchToFlowAndTelegram(payload, adingTabId, adingWinId) 
   notifyAdingTab(adingTabId, `Memproses ${wonum}`, `Membuka FLOW & mengambil SS HD untuk ${techDisplay}...`, "info");
 
   const targetUrl = `https://flow.telkomakses.co.id/EditWorkorder/${encodeURIComponent(wonum)}`;
-  let flowTab = null;
-
   try {
-    // Reuse an existing FLOW tab if open, otherwise create one in the same window
     const existingFlowTabs = await chrome.tabs.query({ url: "https://flow.telkomakses.co.id/*" });
+    let flowTab;
     if (existingFlowTabs.length > 0) {
       flowTab = existingFlowTabs[0];
       await chrome.tabs.update(flowTab.id, { url: targetUrl, active: true });
@@ -65,18 +76,78 @@ async function handleDispatchToFlowAndTelegram(payload, adingTabId, adingWinId) 
       flowTab = await chrome.tabs.create({ url: targetUrl, active: true, windowId: adingWinId || undefined });
     }
 
-    // Wait for Workorder card to appear (up to 90s in case user needs to enter OTP once)
-    const ready = await waitForWorkorderCard(flowTab.id, targetUrl, adingTabId);
-    if (!ready) {
-      notifyAdingTab(adingTabId, "Timeout FLOW Telkom Akses", `Gagal memuat kartu ${wonum}. Pastikan Anda sudah login di tab FLOW.`, "error");
+    const pending = {
+      payload,
+      adingTabId,
+      adingWinId,
+      flowTabId: flowTab.id,
+      targetUrl,
+      techDisplay,
+      wonum,
+      startedAt: Date.now(),
+      processingCapture: false,
+      warnedLogin: false,
+    };
+    await chrome.storage.session.set({ pendingDispatch: pending });
+  } catch (err) {
+    notifyAdingTab(adingTabId, "Error Membuka FLOW", String(err && err.message ? err.message : err), "error");
+  }
+}
+
+async function processFlowTabState(tabId, tab, pending) {
+  const url = ((tab && tab.url) || "").toLowerCase();
+  if (!url || !url.includes("flow.telkomakses.co.id")) return;
+
+  if (url.includes("/unauthorize")) {
+    await chrome.tabs.update(tabId, { url: "https://flow.telkomakses.co.id/" });
+    return;
+  }
+
+  if (url === "https://flow.telkomakses.co.id/" || url.includes("/otp") || url.includes("/login")) {
+    if (!pending.warnedLogin) {
+      pending.warnedLogin = true;
+      await chrome.storage.session.set({ pendingDispatch: pending });
+      notifyAdingTab(pending.adingTabId, "Sesi FLOW Butuh Login/OTP", "Silakan selesaikan login/OTP di tab FLOW. Otomasi akan langsung lanjut!", "info");
+    }
+    return;
+  }
+
+  if (url.includes("/home") || url.includes("/dashboard") || url.endsWith("/workorder") || url.includes("/workorder?")) {
+    await chrome.tabs.update(tabId, { url: pending.targetUrl });
+    return;
+  }
+
+  if (url.includes("/editworkorder/")) {
+    if (pending.processingCapture) return;
+    // Check if card labels are rendered
+    let isReady = false;
+    try {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const t = (document.body && document.body.innerText) || "";
+          return t.includes("OSS Order ID") || t.includes("Service Number") || t.includes("Customer Name");
+        },
+      });
+      isReady = !!result;
+    } catch (_) {
       return;
     }
+    if (!isReady) return;
 
-    // Make sure FLOW tab is active & focused right before captureVisibleTab
+    // Lock & clear pendingDispatch so it only captures once
+    pending.processingCapture = true;
+    await chrome.storage.session.remove(["pendingDispatch"]);
+    await captureCropAndSend(tab, pending);
+  }
+}
+
+async function captureCropAndSend(flowTab, pending) {
+  const { payload, adingTabId, techDisplay, wonum } = pending;
+  try {
     await chrome.tabs.update(flowTab.id, { active: true });
     await sleep(350);
 
-    // Extract unmasked FLOW fields + hide nav + scroll + get exact crop bounding box
     const [{ result: cardInfo }] = await chrome.scripting.executeScript({
       target: { tabId: flowTab.id },
       func: prepareFlowCardAndMeasure,
@@ -156,48 +227,6 @@ async function handleDispatchToFlowAndTelegram(payload, adingTabId, adingWinId) 
   } catch (err) {
     notifyAdingTab(adingTabId, "Error Otomasi FLOW", String(err && err.message ? err.message : err), "error");
   }
-}
-
-async function waitForWorkorderCard(tabId, targetUrl, adingTabId) {
-  let warnedLogin = false;
-  for (let i = 0; i < 180; i++) {
-    await sleep(500);
-    let tab;
-    try {
-      tab = await chrome.tabs.get(tabId);
-    } catch (_) {
-      return false;
-    }
-    const url = (tab.url || "").toLowerCase();
-    if (url.includes("/unauthorize")) {
-      await chrome.tabs.update(tabId, { url: "https://flow.telkomakses.co.id/" });
-      continue;
-    }
-    if (url === "https://flow.telkomakses.co.id/" || url.includes("/otp") || url.includes("/login")) {
-      if (!warnedLogin) {
-        warnedLogin = true;
-        notifyAdingTab(adingTabId, "Sesi FLOW Butuh Login/OTP", "Silakan selesaikan login/OTP di tab FLOW. Otomasi akan langsung lanjut!", "info");
-      }
-      continue;
-    }
-    if (url.includes("/home") || url.includes("/dashboard")) {
-      await chrome.tabs.update(tabId, { url: targetUrl });
-      continue;
-    }
-    if (url.includes("/editworkorder/")) {
-      try {
-        const [{ result: isReady }] = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: () => {
-            const t = (document.body && document.body.innerText) || "";
-            return t.includes("OSS Order ID") || t.includes("Service Number") || t.includes("Customer Name");
-          },
-        });
-        if (isReady) return true;
-      } catch (_) {}
-    }
-  }
-  return false;
 }
 
 function prepareFlowCardAndMeasure() {
