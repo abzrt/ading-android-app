@@ -4,8 +4,11 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -110,37 +113,65 @@ public class GitHubAutoUpdater {
             container.setOrientation(LinearLayout.VERTICAL);
             int pad = dp(activity, 20);
             container.setPadding(pad, pad, pad, pad);
-            container.setBackgroundColor(Color.WHITE);
 
-            LinearLayout headerRow = new LinearLayout(activity);
-            headerRow.setOrientation(LinearLayout.HORIZONTAL);
-            headerRow.setGravity(Gravity.CENTER_VERTICAL);
+            GradientDrawable cardBg = new GradientDrawable();
+            cardBg.setColor(Color.WHITE);
+            cardBg.setCornerRadius(dp(activity, 16));
+            cardBg.setStroke(dp(activity, 1), Color.parseColor("#E5E7EB"));
+            container.setBackground(cardBg);
 
-            View accentPill = new View(activity);
-            accentPill.setBackgroundColor(Color.parseColor("#F9010F"));
-            LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(dp(activity, 4), dp(activity, 22));
-            pillLp.setMargins(0, 0, dp(activity, 10), 0);
-            accentPill.setLayoutParams(pillLp);
-            headerRow.addView(accentPill);
+            // ADING Pill Badge
+            TextView tvBadge = new TextView(activity);
+            tvBadge.setText("ADING • AUTO UPDATE");
+            tvBadge.setTextSize(10.5f);
+            tvBadge.setTypeface(null, Typeface.BOLD);
+            tvBadge.setTextColor(Color.parseColor("#1E3A8A"));
+            GradientDrawable badgeBg = new GradientDrawable();
+            badgeBg.setColor(Color.parseColor("#EEF2FF"));
+            badgeBg.setCornerRadius(dp(activity, 20));
+            tvBadge.setBackground(badgeBg);
+            tvBadge.setPadding(dp(activity, 10), dp(activity, 4), dp(activity, 10), dp(activity, 4));
+            LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            badgeLp.setMargins(0, 0, 0, dp(activity, 10));
+            tvBadge.setLayoutParams(badgeLp);
+            container.addView(tvBadge);
 
             TextView tvTitle = new TextView(activity);
             tvTitle.setText("Update Tersedia: v" + remoteName);
-            tvTitle.setTextSize(16f);
+            tvTitle.setTextSize(17f);
             tvTitle.setTypeface(null, Typeface.BOLD);
             tvTitle.setTextColor(Color.parseColor("#111827"));
-            headerRow.addView(tvTitle);
-            container.addView(headerRow);
+            container.addView(tvTitle);
 
             TextView tvMsg = new TextView(activity);
-            tvMsg.setText(
-                    "Versi terpasang: v" + currentName + "\n" +
-                    "Versi terbaru di GitHub: v" + remoteName + "\n\n" +
-                    "Unduh dan pasang sekarang agar mendapatkan fitur & perbaikan terbaru."
-            );
+            tvMsg.setText("Unduh dan pasang versi terbaru dari GitHub untuk mendapatkan fitur & perbaikan terbaru.");
             tvMsg.setTextSize(13f);
-            tvMsg.setTextColor(Color.parseColor("#4B5563"));
-            tvMsg.setPadding(0, dp(activity, 12), 0, dp(activity, 18));
+            tvMsg.setTextColor(Color.parseColor("#6B7280"));
+            tvMsg.setLineSpacing(dp(activity, 2), 1f);
+            tvMsg.setPadding(0, dp(activity, 6), 0, dp(activity, 14));
             container.addView(tvMsg);
+
+            // Version info box (#F9FAFB fill, 12dp radius, 1dp #D1D5DB border)
+            TextView tvVerBox = new TextView(activity);
+            tvVerBox.setText("Versi terpasang : v" + currentName + "\nVersi terbaru   : v" + remoteName);
+            tvVerBox.setTextSize(13f);
+            tvVerBox.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            tvVerBox.setTextColor(Color.parseColor("#111827"));
+            GradientDrawable boxBg = new GradientDrawable();
+            boxBg.setColor(Color.parseColor("#F9FAFB"));
+            boxBg.setCornerRadius(dp(activity, 12));
+            boxBg.setStroke(dp(activity, 1), Color.parseColor("#D1D5DB"));
+            tvVerBox.setBackground(boxBg);
+            tvVerBox.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
+            container.addView(tvVerBox);
+
+            // Subtle Divider (#F3F4F6)
+            View divider = new View(activity);
+            divider.setBackgroundColor(Color.parseColor("#F3F4F6"));
+            LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 1));
+            divLp.setMargins(0, dp(activity, 18), 0, dp(activity, 14));
+            divider.setLayoutParams(divLp);
+            container.addView(divider);
 
             LinearLayout btnRow = new LinearLayout(activity);
             btnRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -148,19 +179,35 @@ public class GitHubAutoUpdater {
 
             Button btnLater = new Button(activity);
             btnLater.setText("Nanti");
-            btnLater.setTextColor(Color.parseColor("#4B5563"));
-            btnLater.setBackgroundColor(Color.parseColor("#F3F4F6"));
+            btnLater.setTextSize(13.5f);
+            btnLater.setTypeface(null, Typeface.BOLD);
+            btnLater.setTextColor(Color.parseColor("#374151"));
             btnLater.setAllCaps(false);
+            GradientDrawable laterBg = new GradientDrawable();
+            laterBg.setColor(Color.WHITE);
+            laterBg.setCornerRadius(dp(activity, 10));
+            laterBg.setStroke(dp(activity, 1), Color.parseColor("#D1D5DB"));
+            btnLater.setBackground(laterBg);
+            btnLater.setPadding(dp(activity, 18), dp(activity, 10), dp(activity, 18), dp(activity, 10));
+            btnLater.setMinHeight(0);
+            btnLater.setMinimumHeight(dp(activity, 42));
             LinearLayout.LayoutParams laterLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            laterLp.setMargins(0, 0, dp(activity, 8), 0);
+            laterLp.setMargins(0, 0, dp(activity, 10), 0);
             btnLater.setLayoutParams(laterLp);
 
             Button btnUpdate = new Button(activity);
-            btnUpdate.setText("⬇️ Update Sekarang");
+            btnUpdate.setText("Update Sekarang");
+            btnUpdate.setTextSize(13.5f);
             btnUpdate.setTextColor(Color.WHITE);
-            btnUpdate.setBackgroundColor(Color.parseColor("#F9010F"));
             btnUpdate.setAllCaps(false);
             btnUpdate.setTypeface(null, Typeface.BOLD);
+            GradientDrawable updateBg = new GradientDrawable();
+            updateBg.setColor(Color.parseColor("#1E3A8A"));
+            updateBg.setCornerRadius(dp(activity, 10));
+            btnUpdate.setBackground(updateBg);
+            btnUpdate.setPadding(dp(activity, 20), dp(activity, 10), dp(activity, 20), dp(activity, 10));
+            btnUpdate.setMinHeight(0);
+            btnUpdate.setMinimumHeight(dp(activity, 42));
 
             btnRow.addView(btnLater);
             btnRow.addView(btnUpdate);
@@ -169,6 +216,9 @@ public class GitHubAutoUpdater {
             builder.setView(container);
             builder.setCancelable(true);
             AlertDialog dialog = builder.create();
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            }
 
             btnLater.setOnClickListener(v -> dialog.dismiss());
             btnUpdate.setOnClickListener(v -> {
@@ -188,11 +238,30 @@ public class GitHubAutoUpdater {
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(activity, 20);
         root.setPadding(pad, pad, pad, pad);
-        root.setBackgroundColor(Color.WHITE);
+        GradientDrawable progCardBg = new GradientDrawable();
+        progCardBg.setColor(Color.WHITE);
+        progCardBg.setCornerRadius(dp(activity, 16));
+        progCardBg.setStroke(dp(activity, 1), Color.parseColor("#E5E7EB"));
+        root.setBackground(progCardBg);
+
+        TextView tvBadge = new TextView(activity);
+        tvBadge.setText("ADING • MENGUNDUH");
+        tvBadge.setTextSize(10.5f);
+        tvBadge.setTypeface(null, Typeface.BOLD);
+        tvBadge.setTextColor(Color.parseColor("#1E3A8A"));
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setColor(Color.parseColor("#EEF2FF"));
+        badgeBg.setCornerRadius(dp(activity, 20));
+        tvBadge.setBackground(badgeBg);
+        tvBadge.setPadding(dp(activity, 10), dp(activity, 4), dp(activity, 10), dp(activity, 4));
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        badgeLp.setMargins(0, 0, 0, dp(activity, 10));
+        tvBadge.setLayoutParams(badgeLp);
+        root.addView(tvBadge);
 
         TextView tvTitle = new TextView(activity);
-        tvTitle.setText("⬇️ Mengunduh Ading Mobile v" + remoteName);
-        tvTitle.setTextSize(15f);
+        tvTitle.setText("Mengunduh Ading Mobile v" + remoteName);
+        tvTitle.setTextSize(16f);
         tvTitle.setTypeface(null, Typeface.BOLD);
         tvTitle.setTextColor(Color.parseColor("#111827"));
         root.addView(tvTitle);
@@ -200,6 +269,8 @@ public class GitHubAutoUpdater {
         ProgressBar progressBar = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
         progressBar.setIndeterminate(true);
+        progressBar.setProgressTintList(ColorStateList.valueOf(Color.parseColor("#1E3A8A")));
+        progressBar.setIndeterminateTintList(ColorStateList.valueOf(Color.parseColor("#1E3A8A")));
         LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pbLp.setMargins(0, dp(activity, 14), 0, dp(activity, 8));
         progressBar.setLayoutParams(pbLp);
@@ -207,14 +278,17 @@ public class GitHubAutoUpdater {
 
         TextView tvProgress = new TextView(activity);
         tvProgress.setText("Menghubungkan ke GitHub...");
-        tvProgress.setTextSize(12f);
-        tvProgress.setTextColor(Color.parseColor("#4B5563"));
+        tvProgress.setTextSize(12.5f);
+        tvProgress.setTextColor(Color.parseColor("#6B7280"));
         root.addView(tvProgress);
 
         AlertDialog progressDialog = new AlertDialog.Builder(activity)
                 .setView(root)
                 .setCancelable(false)
                 .create();
+        if (progressDialog.getWindow() != null) {
+            progressDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
         progressDialog.show();
 
         executor.execute(() -> {
