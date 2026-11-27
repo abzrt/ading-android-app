@@ -702,7 +702,13 @@ public class WfmFlowAutomationManager {
                     List<String> targetChatIds = resolveTechnicianTargetChatIds(activity, leaderName, namaTim, leaderNik, fallbackChatId);
                     if (croppedBitmap != null && !tgToken.isEmpty() && !targetChatIds.isEmpty()) {
                         String finalCaption = (copiedText != null && !copiedText.trim().isEmpty())
-                                ? copiedText.trim()
+                                ? unmaskCaptionWithFlowData(
+                                        copiedText.trim(),
+                                        extCustName,
+                                        extAddress,
+                                        extContactNo,
+                                        extServiceNo
+                                )
                                 : buildFallbackTelegramCaption(
                                         noSc,
                                         resolvedWonum[0],
@@ -1873,6 +1879,34 @@ public class WfmFlowAutomationManager {
             targets.add(fallbackChatId.trim());
         }
         return targets;
+    }
+
+    private static String unmaskCaptionWithFlowData(
+            String rawCaption,
+            String flowCustName,
+            String flowAddress,
+            String flowContactNo,
+            String flowServiceNo
+    ) {
+        if (rawCaption == null || rawCaption.isEmpty()) return "";
+        String[] lines = rawCaption.split("\\r?\\n");
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String upper = line.trim().toUpperCase(Locale.ROOT);
+            if (upper.startsWith("CUSTOMER NAME:") && flowCustName != null && !flowCustName.isEmpty() && !flowCustName.contains("*")) {
+                line = "CUSTOMER NAME: " + flowCustName;
+            } else if (upper.startsWith("ALAMAT:") && flowAddress != null && !flowAddress.isEmpty() && !flowAddress.contains("*")) {
+                line = "ALAMAT: " + flowAddress;
+            } else if (upper.startsWith("CONTACT NUMBER:") && line.contains("*") && flowContactNo != null && !flowContactNo.isEmpty() && !flowContactNo.contains("*")) {
+                line = "CONTACT NUMBER: " + flowContactNo;
+            } else if (upper.startsWith("NO INTERNET:") && line.contains("*") && flowServiceNo != null && !flowServiceNo.isEmpty() && !flowServiceNo.contains("*")) {
+                line = "NO INTERNET: " + flowServiceNo;
+            }
+            if (i > 0) out.append("\n");
+            out.append(line);
+        }
+        return out.toString();
     }
 
     private static String buildFallbackTelegramCaption(
