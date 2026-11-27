@@ -7,10 +7,12 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -173,6 +175,11 @@ public class WfmFlowAutomationManager {
                     .setOngoing(ongoing)
                     .setPriority(ongoing ? NotificationCompat.PRIORITY_LOW : NotificationCompat.PRIORITY_HIGH)
                     .setOnlyAlertOnce(true);
+            Intent openAppIntent = new Intent(context, MainActivity.class);
+            openAppIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+            PendingIntent pi = PendingIntent.getActivity(context, NOTIF_PROGRESS_ID, openAppIntent, piFlags);
+            b.setContentIntent(pi);
             if (ongoing) {
                 b.setProgress(0, 0, true);
             }
@@ -848,10 +855,6 @@ public class WfmFlowAutomationManager {
                     // 3. CHECK IF ON /otp PAGE OR #otp INPUT PRESENT
                     "var otpInput = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
                     "if(path.indexOf('/otp') !== -1 || otpInput){" +
-                    "  if(localStorage.getItem('menus')){" +
-                    "    window.location.href = targetFlowDest;" +
-                    "    return 'REDIRECT_TO_WORKORDER';" +
-                    "  }" +
                     "  return 'READY_FOR_OTP';" +
                     "}" +
 
@@ -871,6 +874,7 @@ public class WfmFlowAutomationManager {
                     "if(userInput && passInput){" +
                     "  if(!window.__adingLoginSubmitted){" +
                     "    window.__adingLoginSubmitted = true;" +
+                    "    try{ localStorage.removeItem('menus'); }catch(e){}" +
                     "    userInput.value = '" + safeUser + "';" +
                     "    userInput.dispatchEvent(new Event('input', {bubbles:true}));" +
                     "    userInput.dispatchEvent(new Event('change', {bubbles:true}));" +
@@ -909,8 +913,9 @@ public class WfmFlowAutomationManager {
                     "  return 'NAVIGATING_TO_WORKORDER';" +
                     "}" +
 
-                    // 7. IF ON /unauthorize, RETURN TO /
+                    // 7. IF ON /unauthorize, CLEAR STALE MENUS AND RETURN TO /
                     "if(path.indexOf('/unauthorize') !== -1){" +
+                    "  try{ localStorage.removeItem('menus'); }catch(e){}" +
                     "  window.location.href = '/';" +
                     "  return 'NAVIGATING_TO_ROOT';" +
                     "}" +
@@ -1111,7 +1116,10 @@ public class WfmFlowAutomationManager {
                 });
 
                 dialog.show();
-            } catch (Exception ignored) {
+                Toast.makeText(activity, "📲 Masukkan 6 digit OTP FLOW dari Telegram!", Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                isWaitingForOtp[0] = false;
+                Toast.makeText(activity, "Gagal membuka dialog OTP: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
     }
