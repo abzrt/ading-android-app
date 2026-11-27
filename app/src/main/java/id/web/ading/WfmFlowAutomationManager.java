@@ -472,7 +472,7 @@ public class WfmFlowAutomationManager {
             FrameLayout bgContainer = new FrameLayout(activity);
             bgContainer.setTag("TAG_WFM_BG_CONTAINER");
             int bgWidth = 1366;
-            int bgHeight = 900;
+            int bgHeight = 950;
             RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(bgWidth, bgHeight);
             bgContainer.setLayoutParams(lp);
 
@@ -492,9 +492,15 @@ public class WfmFlowAutomationManager {
             settings.setDatabaseEnabled(true);
             settings.setUseWideViewPort(true);
             settings.setLoadWithOverviewMode(true);
-            settings.setSupportZoom(false);
+            settings.setSupportZoom(true);
+            settings.setBuiltInZoomControls(true);
             settings.setDisplayZoomControls(false);
+            settings.setTextZoom(100);
             settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+
+            float density = activity.getResources().getDisplayMetrics().density;
+            int desktopScale = Math.max(20, Math.round(100f / Math.max(1f, density)));
+            bgWebView.setInitialScale(desktopScale);
 
             CookieManager cm = CookieManager.getInstance();
             cm.setAcceptCookie(true);
@@ -1191,7 +1197,8 @@ public class WfmFlowAutomationManager {
                 "var rectObj = null;" +
                 "var anchorEl = tabEl || formEl;" +
                 "if(anchorEl){" +
-                "  anchorEl.scrollIntoView({block:'start', inline:'nearest'});" +
+                "  var absTop = anchorEl.getBoundingClientRect().top + window.scrollY;" +
+                "  window.scrollTo(0, Math.max(0, absTop - 70));" +
                 "  var fr = (formEl || anchorEl).getBoundingClientRect();" +
                 "  var topY = tabEl ? tabEl.getBoundingClientRect().top : fr.top;" +
                 "  var botY = prodEl ? (prodEl.getBoundingClientRect().bottom + 14) : (schedEl ? (schedEl.getBoundingClientRect().top - 8) : fr.bottom);" +
@@ -1287,7 +1294,8 @@ public class WfmFlowAutomationManager {
     private static void injectDesktopViewport(WebView webView) {
         String js = "(function(){" +
                 "var meta = document.querySelector('meta[name=\"viewport\"]');" +
-                "if(meta){ meta.setAttribute('content', 'width=1280, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes'); }" +
+                "if(!meta){ meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); }" +
+                "meta.setAttribute('content', 'width=1366');" +
                 "})();";
         webView.evaluateJavascript(js, null);
     }
