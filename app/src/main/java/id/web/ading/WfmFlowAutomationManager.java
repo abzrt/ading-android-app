@@ -59,6 +59,9 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -73,6 +76,14 @@ public class WfmFlowAutomationManager {
     public static final String DEFAULT_FLOW_PASS = "narindo1";
     public static final String DEFAULT_TG_TOKEN = "9111712229:AAERRc7RmQMXy4LSIvA-mty5Ckw6q-b0cUQ";
     public static final String DEFAULT_TG_CHAT_ID = "217411824";
+    public static final String DEFAULT_TECH_MAPPING =
+            "ARIFIN=-1002202217652\n" +
+            "MUHAMMAD RISQI=-1002165761538\n" +
+            "AHMAD SYAHRIZAK RAMADHANI=-1002280689139\n" +
+            "ANJELLO=-1002960116555\n" +
+            "ANDI MUHAMMAD RAJAB=-1003818907805\n" +
+            "MUHAMMAD NAZAR ALFATH=-1004329000380\n" +
+            "ALIF JUNAIDI=-1002975699950";
 
     private static final String PREFS_NAME = "ading_wfm_prefs";
     private static final String KEY_FLOW_USER = "flow_username";
@@ -80,6 +91,7 @@ public class WfmFlowAutomationManager {
     private static final String KEY_TG_TOKEN = "tg_bot_token";
     private static final String KEY_TG_CHAT_ID = "tg_chat_id";
     private static final String KEY_TG_THREAD_ID = "tg_thread_id";
+    private static final String KEY_TECH_MAPPING = "tg_tech_mapping";
 
     private static final String KEY_FLOW_COOKIES = "flow_saved_cookies";
 
@@ -111,12 +123,19 @@ public class WfmFlowAutomationManager {
     }
 
     public static void saveTelegramConfig(Context context, String token, String chatId, String threadId) {
+        saveTelegramConfig(context, token, chatId, threadId, null);
+    }
+
+    public static void saveTelegramConfig(Context context, String token, String chatId, String threadId, String techMapping) {
         SharedPreferences prefs = getPrefs(context);
-        prefs.edit()
+        SharedPreferences.Editor ed = prefs.edit()
                 .putString(KEY_TG_TOKEN, (token != null && !token.trim().isEmpty()) ? token.trim() : DEFAULT_TG_TOKEN)
                 .putString(KEY_TG_CHAT_ID, (chatId != null && !chatId.trim().isEmpty()) ? chatId.trim() : DEFAULT_TG_CHAT_ID)
-                .putString(KEY_TG_THREAD_ID, threadId != null ? threadId.trim() : "")
-                .apply();
+                .putString(KEY_TG_THREAD_ID, threadId != null ? threadId.trim() : "");
+        if (techMapping != null) {
+            ed.putString(KEY_TECH_MAPPING, techMapping.trim().isEmpty() ? DEFAULT_TECH_MAPPING : techMapping.trim());
+        }
+        ed.apply();
     }
 
 
@@ -684,11 +703,12 @@ public class WfmFlowAutomationManager {
                     persistCookies(activity);
                     cancelProgressNotification(activity);
 
-                    // Auto-send cropped Workorder SS + ADING "Salin" text to Telegram Bot (@biarndalupa_bot)
+                    // Auto-send cropped Workorder SS + ADING "Salin" text to matched Technician Channel (+ Personal ID) via Telegram Bot
                     String tgToken = prefs.getString(KEY_TG_TOKEN, DEFAULT_TG_TOKEN).trim();
-                    String tgChatId = prefs.getString(KEY_TG_CHAT_ID, DEFAULT_TG_CHAT_ID).trim();
+                    String fallbackChatId = prefs.getString(KEY_TG_CHAT_ID, DEFAULT_TG_CHAT_ID).trim();
                     String tgThreadId = prefs.getString(KEY_TG_THREAD_ID, "").trim();
-                    if (croppedBitmap != null && !tgToken.isEmpty() && !tgChatId.isEmpty()) {
+                    List<String> targetChatIds = resolveTechnicianTargetChatIds(activity, leaderName, namaTim, leaderNik, fallbackChatId);
+                    if (croppedBitmap != null && !tgToken.isEmpty() && !targetChatIds.isEmpty()) {
                         String finalCaption = (copiedText != null && !copiedText.trim().isEmpty())
                                 ? copiedText.trim()
                                 : buildFallbackTelegramCaption(
@@ -705,17 +725,25 @@ public class WfmFlowAutomationManager {
                                         koordinat
                                 );
                         Bitmap photoCopy = croppedBitmap.copy(croppedBitmap.getConfig() != null ? croppedBitmap.getConfig() : Bitmap.Config.ARGB_8888, false);
-                        Toast.makeText(activity, "📤 Mengirim SS WFM & Data Salin ke Telegram...", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(activity, "📤 Mengirim SS WFM & Data ke Telegram (" + techDisplay + ")...", Toast.LENGTH_SHORT).show();
                         tgExecutor.execute(() -> {
-                            boolean sent = uploadPhotoToTelegram(tgToken, tgChatId, tgThreadId, photoCopy, finalCaption);
+                            int sentCount = 0;
+                            for (String cid : targetChatIds) {
+                                String useThread = cid.equals(fallbackChatId) ? tgThreadId : "";
+                                if (uploadPhotoToTelegram(tgToken, cid, useThread, photoCopy, finalCaption)) {
+                                    sentCount++;
+                                }
+                            }
                             if (photoCopy != null && !photoCopy.isRecycled()) {
                                 photoCopy.recycle();
                             }
+                            final int finalSent = sentCount;
+                            final int totalTargets = targetChatIds.size();
                             mainHandler.post(() -> {
-                                if (sent) {
-                                    Toast.makeText(activity, "✅ SS WFM & Data " + (!resolvedWonum[0].isEmpty() ? resolvedWonum[0] : noSc) + " terkirim ke Telegram!", Toast.LENGTH_LONG).show();
+                                if (finalSent > 0) {
+                                    Toast.makeText(activity, "✅ SS WFM & Data " + (!resolvedWonum[0].isEmpty() ? resolvedWonum[0] : noSc) + " terkirim ke " + finalSent + "/" + totalTargets + " target Telegram (" + techDisplay + ")!", Toast.LENGTH_LONG).show();
                                 } else {
-                                    Toast.makeText(activity, "⚠️ SS tersimpan di Galeri, tapi gagal kirim ke Telegram.", Toast.LENGTH_LONG).show();
+                                    Toast.makeText(activity, "⚠️ SS tersimpan di Galeri, tapi gagal kirim ke Telegram (" + techDisplay + "). Pastikan bot sudah jadi Admin channel.", Toast.LENGTH_LONG).show();
                                 }
                             });
                         });
@@ -1496,11 +1524,22 @@ public class WfmFlowAutomationManager {
 
             addSectionHeader(container, activity, "✈️ Bot Telegram AutoSender");
             EditText etTgToken = createInput(activity, "Bot Token Telegram", prefs.getString(KEY_TG_TOKEN, DEFAULT_TG_TOKEN), false);
-            EditText etTgChatId = createInput(activity, "Chat ID Tujuan", prefs.getString(KEY_TG_CHAT_ID, DEFAULT_TG_CHAT_ID), false);
+            EditText etTgChatId = createInput(activity, "Chat ID Fallback (jika teknisi belum terdaftar)", prefs.getString(KEY_TG_CHAT_ID, DEFAULT_TG_CHAT_ID), false);
             EditText etTgThreadId = createInput(activity, "Topic / Thread ID (opsional)", prefs.getString(KEY_TG_THREAD_ID, ""), false);
             container.addView(etTgToken);
             container.addView(etTgChatId);
             container.addView(etTgThreadId);
+
+            addSectionHeader(container, activity, "👷 Mapping Teknisi → Channel,ID Pribadi");
+            EditText etTechMapping = new EditText(activity);
+            etTechMapping.setHint("NAMA=-100channel,id_pribadi");
+            etTechMapping.setText(prefs.getString(KEY_TECH_MAPPING, DEFAULT_TECH_MAPPING));
+            etTechMapping.setTextSize(11.5f);
+            etTechMapping.setSingleLine(false);
+            etTechMapping.setMinLines(4);
+            etTechMapping.setMaxLines(8);
+            etTechMapping.setGravity(Gravity.TOP | Gravity.START);
+            container.addView(etTechMapping);
 
             AlertDialog dialog = new AlertDialog.Builder(activity)
                     .setView(scrollView)
@@ -1511,7 +1550,7 @@ public class WfmFlowAutomationManager {
 
             btnLoginFlow.setOnClickListener(v -> {
                 saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
-                saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString());
+                saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString(), etTechMapping.getText().toString());
                 dialog.dismiss();
                 openSessionHelperDialog(activity, FLOW_WORKORDER_URL, "🔑 Sesi Login FLOW Telkom Akses");
             });
@@ -1519,13 +1558,13 @@ public class WfmFlowAutomationManager {
             dialog.setOnShowListener(dlg -> {
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
                     saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
-                    saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString());
-                    Toast.makeText(activity, "Kredensial FLOW & Bot Telegram disimpan!", Toast.LENGTH_SHORT).show();
+                    saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString(), etTechMapping.getText().toString());
+                    Toast.makeText(activity, "Kredensial FLOW & Mapping Teknisi disimpan!", Toast.LENGTH_SHORT).show();
                 });
 
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
-                    saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString());
+                    saveTelegramConfig(activity, etTgToken.getText().toString(), etTgChatId.getText().toString(), etTgThreadId.getText().toString(), etTechMapping.getText().toString());
                     String inputVal = etNoSc.getText().toString().trim();
                     if (inputVal.isEmpty()) {
                         Toast.makeText(activity, "Masukkan WONUM atau NO SC terlebih dahulu!", Toast.LENGTH_SHORT).show();
@@ -1661,6 +1700,48 @@ public class WfmFlowAutomationManager {
 
     private static int dp(Context context, int dp) {
         return (int) (dp * context.getResources().getDisplayMetrics().density);
+    }
+
+    private static List<String> resolveTechnicianTargetChatIds(
+            Context context,
+            String leaderName,
+            String namaTim,
+            String leaderNik,
+            String fallbackChatId
+    ) {
+        List<String> targets = new ArrayList<>();
+        String mappingRaw = getPrefs(context).getString(KEY_TECH_MAPPING, DEFAULT_TECH_MAPPING);
+        String hayLeader = leaderName != null ? leaderName.trim().toUpperCase(Locale.ROOT) : "";
+        String hayTim = namaTim != null ? namaTim.trim().toUpperCase(Locale.ROOT) : "";
+        String hayNik = leaderNik != null ? leaderNik.trim().toUpperCase(Locale.ROOT) : "";
+
+        if (mappingRaw != null && (!hayLeader.isEmpty() || !hayTim.isEmpty() || !hayNik.isEmpty())) {
+            String[] lines = mappingRaw.split("\\r?\\n");
+            for (String line : lines) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || !trimmed.contains("=")) continue;
+                int eq = trimmed.indexOf('=');
+                String key = trimmed.substring(0, eq).trim().toUpperCase(Locale.ROOT);
+                String vals = trimmed.substring(eq + 1).trim();
+                if (key.isEmpty() || vals.isEmpty()) continue;
+
+                boolean matched = (!hayLeader.isEmpty() && (hayLeader.contains(key) || key.contains(hayLeader)))
+                        || (!hayTim.isEmpty() && hayTim.contains(key))
+                        || (!hayNik.isEmpty() && key.equals(hayNik));
+                if (matched) {
+                    for (String idPart : vals.split(",")) {
+                        String cid = idPart.trim();
+                        if (!cid.isEmpty() && !targets.contains(cid)) {
+                            targets.add(cid);
+                        }
+                    }
+                }
+            }
+        }
+        if (targets.isEmpty() && fallbackChatId != null && !fallbackChatId.trim().isEmpty()) {
+            targets.add(fallbackChatId.trim());
+        }
+        return targets;
     }
 
     private static String buildFallbackTelegramCaption(
