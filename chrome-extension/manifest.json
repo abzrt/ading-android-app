@@ -1,17 +1,13 @@
 {
   "manifest_version": 3,
   "name": "ADING Web Auto-Dispatch WFM FLOW",
-  "version": "1.0.0",
-  "description": "Otomatis salin data ADING, ambil SS kartu Workorder HD dari FLOW Telkom Akses, unmask nama/alamat, dan kirim ke Channel Telegram Teknisi.",
+  "version": "1.1.0",
+  "description": "Otomatis salin data ADING, ambil SS kartu Workorder HD dari WFM FLOW Standalone Railway, unmask nama/alamat, dan kirim ke Channel Telegram Teknisi.",
   "permissions": [
-    "tabs",
-    "scripting",
     "storage"
   ],
   "host_permissions": [
     "https://ading.web.id/*",
-    "https://flow.telkomakses.co.id/*",
-    "https://api.telegram.org/*",
     "https://bot-production-a5484be7.up.railway.app/*"
   ],
   "background": {

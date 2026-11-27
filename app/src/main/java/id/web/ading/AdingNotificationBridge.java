@@ -243,11 +243,6 @@ public class AdingNotificationBridge {
         }
     }
 
-    @JavascriptInterface
-    public void openWfmHebitPanel() {
-        openWfmPanel();
-    }
-
     public static void injectWebNotificationHook(WebView view) {
         if (view == null) return;
         sWebViewRef = new WeakReference<>(view);
