@@ -58,10 +58,11 @@ public class WfmFlowAutomationManager {
 
     public static final String FLOW_LOGIN_URL = "https://flow.telkomakses.co.id/";
     public static final String FLOW_WORKORDER_URL = "https://flow.telkomakses.co.id/workorder";
+    public static final String FLOW_EDIT_WORKORDER_URL = "https://flow.telkomakses.co.id/EditWorkorder/";
     public static final String ADING_URL = "https://ading.web.id/";
 
     public static final String DEFAULT_FLOW_USER = "16830482";
-    public static final String DEFAULT_FLOW_PASS = "Narindo@2026";
+    public static final String DEFAULT_FLOW_PASS = "narindo1";
 
     private static final String PREFS_NAME = "ading_wfm_prefs";
     private static final String KEY_FLOW_USER = "flow_username";
@@ -77,14 +78,8 @@ public class WfmFlowAutomationManager {
 
     public static SharedPreferences getPrefs(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        if (prefs.getString(KEY_FLOW_USER, "").isEmpty()) {
-            SharedPreferences oldPrefs = context.getSharedPreferences("ading_wfm_hebit_prefs", Context.MODE_PRIVATE);
-            String oldFlowUser = oldPrefs.getString(KEY_FLOW_USER, DEFAULT_FLOW_USER);
-            String oldFlowPass = oldPrefs.getString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS);
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString(KEY_FLOW_USER, oldFlowUser);
-            editor.putString(KEY_FLOW_PASS, oldFlowPass);
-            editor.apply();
+        if ("Narindo@2026".equals(prefs.getString(KEY_FLOW_PASS, ""))) {
+            prefs.edit().putString(KEY_FLOW_PASS, DEFAULT_FLOW_PASS).apply();
         }
         return prefs;
     }
@@ -101,15 +96,6 @@ public class WfmFlowAutomationManager {
                 .apply();
     }
 
-    public static void saveCredentials(
-            Context context,
-            String flowUser,
-            String flowPass,
-            String hebitUser,
-            String hebitPass
-    ) {
-        saveCredentials(context, flowUser, flowPass);
-    }
 
     /**
      * Persists FLOW session cookies into SharedPreferences
@@ -361,9 +347,20 @@ public class WfmFlowAutomationManager {
                 "          }" +
                 "          var cleanLeader = cachedTeam && cachedTeam.leader_name ? String(cachedTeam.leader_name) : (namaTim ? namaTim.split('(')[0].trim() : '');" +
                 "          var cleanNik = cachedTeam && cachedTeam.leader_nik ? String(cachedTeam.leader_nik) : (cachedTeam && cachedTeam.chief_code ? String(cachedTeam.chief_code) : '');" +
+                "          var resolvedWonum = item.wonum || cachedOrder.WONUM || '';" +
+                "          if((!resolvedWonum || resolvedWonum === '-') && noSc){" +
+                "            var domNodes = document.querySelectorAll('tr, .card, div');" +
+                "            for(var di=0; di<domNodes.length; di++){" +
+                "              var dTxt = domNodes[di].innerText || '';" +
+                "              if(dTxt.indexOf(noSc) !== -1 && dTxt.indexOf('WO') !== -1 && dTxt.length < 1500){" +
+                "                var wm = dTxt.match(/\\b(WO[0-9]{6,})\\b/i);" +
+                "                if(wm){ resolvedWonum = wm[1].toUpperCase(); break; }" +
+                "              }" +
+                "            }" +
+                "          }" +
                 "          var payload = {" +
                 "            no_sc: noSc," +
-                "            wonum: item.wonum || cachedOrder.WONUM || ''," +
+                "            wonum: resolvedWonum," +
                 "            sto: item.sto || cachedOrder.STO || ''," +
                 "            service_area: sa || (cachedTeam ? cachedTeam.service_area : '')," +
                 "            nama_tim: namaTim," +
@@ -629,12 +626,16 @@ public class WfmFlowAutomationManager {
                 }
             });
 
-            // Start master high-speed state loop
-            bgWebView.loadUrl(FLOW_WORKORDER_URL);
+            // Start master high-speed state loop (direct to /EditWorkorder/<WONUM> if WONUM available)
+            String startFlowUrl = !resolvedWonum[0].isEmpty()
+                    ? (FLOW_EDIT_WORKORDER_URL + resolvedWonum[0])
+                    : FLOW_WORKORDER_URL;
+            bgWebView.loadUrl(startFlowUrl);
             runFlowPipelineFastLoop(
                     bgWebView,
                     isFinished,
                     noSc,
+                    resolvedWonum[0],
                     flowUser,
                     flowPass,
                     flowSsCaptured,
@@ -647,25 +648,6 @@ public class WfmFlowAutomationManager {
         });
     }
 
-    public static void runFullDispatchToFlowAndHebitPipeline(
-            Activity activity,
-            String noSc,
-            String initialWonum,
-            String serviceArea,
-            String namaTim,
-            String leaderNik,
-            String leaderName,
-            String paket,
-            String odp,
-            String koordinat,
-            String bookingDate,
-            String assignedBy
-    ) {
-        runFullDispatchToFlowPipeline(
-                activity, noSc, initialWonum, serviceArea, namaTim, leaderNik, leaderName,
-                paket, odp, koordinat, bookingDate, assignedBy
-        );
-    }
 
     /**
      * UNIFIED HIGH-SPEED FLOW AUTOMATION LOOP (POLLS EVERY 350MS):
@@ -681,6 +663,7 @@ public class WfmFlowAutomationManager {
             WebView view,
             boolean[] isFinished,
             String noSc,
+            String targetWonum,
             String flowUser,
             String flowPass,
             boolean[] flowSsCaptured,
@@ -707,11 +690,12 @@ public class WfmFlowAutomationManager {
 
             // Pause polling while waiting for user to type OTP in the dialog - do NOT increment attempt
             if (isWaitingForOtp[0]) {
-                runFlowPipelineFastLoop(view, isFinished, noSc, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt);
+                runFlowPipelineFastLoop(view, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt);
                 return;
             }
 
             String safeSc = escapeJs(noSc);
+            String safeWonum = escapeJs(targetWonum != null ? targetWonum.trim() : "");
             String safeUser = escapeJs(flowUser);
             String safePass = escapeJs(flowPass);
 
@@ -719,8 +703,11 @@ public class WfmFlowAutomationManager {
                     "var path = window.location.pathname || '';" +
                     "var targetSc = '" + safeSc + "';" +
                     "var targetLower = targetSc.toLowerCase();" +
+                    "var targetWo = '" + safeWonum + "';" +
+                    "var targetWoUpper = targetWo.toUpperCase();" +
+                    "var targetFlowDest = targetWo ? ('/EditWorkorder/' + targetWo) : '/workorder';" +
 
-                    // 1. DETAIL CARD READY CHECK (Foto Ketiga)
+                    // 1. DETAIL CARD READY CHECK
                     "function getDetailVal(lbl){" +
                     "  var nodes = document.querySelectorAll('label, div, span, td');" +
                     "  for(var i=0; i<nodes.length; i++){" +
@@ -748,18 +735,31 @@ public class WfmFlowAutomationManager {
                     "if(!scDetailVal || !woDetailVal){" +
                     "  var allInputs = document.querySelectorAll('input, textarea');" +
                     "  for(var ai=0; ai<allInputs.length; ai++){" +
-                    "    var aiv = (allInputs[ai].value || '').toLowerCase();" +
-                    "    if(aiv.indexOf(targetLower) !== -1){ scDetailVal = aiv; }" +
-                    "    if(aiv.toUpperCase().indexOf('WO0') !== -1 || (aiv.toUpperCase().indexOf('WO') === 0 && aiv.length >= 8)){ woDetailVal = aiv; }" +
+                    "    var aiv = (allInputs[ai].value || '').trim();" +
+                    "    var aivLower = aiv.toLowerCase();" +
+                    "    if(targetLower && aivLower.indexOf(targetLower) !== -1){ scDetailVal = aiv; }" +
+                    "    if(targetWoUpper && aiv.toUpperCase() === targetWoUpper){ woDetailVal = aiv; }" +
+                    "    else if(!woDetailVal && (aiv.toUpperCase().indexOf('WO0') !== -1 || (aiv.toUpperCase().indexOf('WO') === 0 && aiv.length >= 8))){ woDetailVal = aiv; }" +
                     "  }" +
                     "}" +
-                    "if(scDetailVal && scDetailVal.toLowerCase().indexOf(targetLower) !== -1 && woDetailVal && woDetailVal.toUpperCase().indexOf('WO') !== -1){" +
+                    "var isWoCardMatch = targetWoUpper ? (woDetailVal && woDetailVal.toUpperCase().indexOf(targetWoUpper) !== -1) : (scDetailVal && scDetailVal.toLowerCase().indexOf(targetLower) !== -1 && woDetailVal && woDetailVal.toUpperCase().indexOf('WO') !== -1);" +
+                    "if(isWoCardMatch){" +
                     "  document.querySelectorAll('.modal.show, .modal-backdrop').forEach(function(m){ m.style.display='none'; });" +
                     "  return 'DETAIL_CARD_READY:' + woDetailVal;" +
                     "}" +
 
-                    // 2. ON /workorder TABLE: FILTER & CLICK ROW
-                    "if(path.indexOf('/workorder') !== -1){" +
+                    // 1B. DIRECT NAVIGATE BY WONUM VIA /EditWorkorder/<WONUM> WHEN LOGGED IN
+                    "var searchWonumInp = document.getElementById('searchWonum');" +
+                    "if(targetWo && (searchWonumInp || path.indexOf('/home') !== -1 || path.indexOf('/dashboard') !== -1 || path.indexOf('/workorder') !== -1)){" +
+                    "  if(path.toLowerCase().indexOf('/editworkorder/' + targetWo.toLowerCase()) === -1 && !window.__adingNavigatedToWo){" +
+                    "    window.__adingNavigatedToWo = true;" +
+                    "    window.location.href = '/EditWorkorder/' + targetWo;" +
+                    "    return 'NAVIGATING_TO_WONUM';" +
+                    "  }" +
+                    "}" +
+
+                    // 2. ON /workorder TABLE: FILTER & CLICK ROW (Fallback when WONUM empty)
+                    "if(!targetWo && path.indexOf('/workorder') !== -1){" +
                     "  document.querySelectorAll('.modal-backdrop').forEach(function(b){ if(!document.querySelector('.modal.show')) b.remove(); });" +
                     "  if(window.__adingRowClickTime && (Date.now() - window.__adingRowClickTime) > 3500){" +
                     "    var oldClickedRows = document.querySelectorAll('[data-ading-clicked]');" +
@@ -845,7 +845,7 @@ public class WfmFlowAutomationManager {
                     "var otpInput = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
                     "if(path.indexOf('/otp') !== -1 || otpInput){" +
                     "  if(localStorage.getItem('menus')){" +
-                    "    window.location.href = '/workorder';" +
+                    "    window.location.href = targetFlowDest;" +
                     "    return 'REDIRECT_TO_WORKORDER';" +
                     "  }" +
                     "  return 'READY_FOR_OTP';" +
@@ -858,6 +858,10 @@ public class WfmFlowAutomationManager {
                     "}" +
 
                     // 5. CHECK IF ON LOGIN FORM: AUTO FILL & SUBMIT
+                    "var swalText = (document.querySelector('.swal2-html-container, .swal2-content') || {}).innerText || '';" +
+                    "if(swalText.toLowerCase().indexOf('password salah') !== -1){" +
+                    "  return 'LOGIN_WRONG_PASSWORD';" +
+                    "}" +
                     "var userInput = document.getElementById('inputEmail4') || document.querySelector('input[name=\"username\"]');" +
                     "var passInput = document.getElementById('inputPassword4') || document.querySelector('input[name=\"password\"]');" +
                     "if(userInput && passInput){" +
@@ -878,8 +882,9 @@ public class WfmFlowAutomationManager {
                     "    }" +
                     "    if(window.Swal){" +
                     "      var origFire = window.Swal.fire;" +
-                    "      window.Swal.fire = function(){" +
-                    "        setTimeout(function(){ window.location.href = '/otp'; }, 50);" +
+                    "      window.Swal.fire = function(arg){" +
+                    "        var isErr = arg && (arg.icon === 'error' || String(arg.text || arg.title || '').toLowerCase().indexOf('salah') !== -1);" +
+                    "        if(!isErr){ setTimeout(function(){ window.location.href = '/otp'; }, 50); }" +
                     "        return origFire.apply(this, arguments);" +
                     "      };" +
                     "    }" +
@@ -894,9 +899,9 @@ public class WfmFlowAutomationManager {
                     "  return 'LOGIN_WAITING_RESPONSE';" +
                     "}" +
 
-                    // 6. IF ON /home OR /dashboard, DIRECTLY OPEN /workorder
+                    // 6. IF ON /home OR /dashboard, DIRECTLY OPEN TARGET
                     "if(path.indexOf('/home') !== -1 || path.indexOf('/dashboard') !== -1){" +
-                    "  window.location.href = '/workorder';" +
+                    "  window.location.href = targetFlowDest;" +
                     "  return 'NAVIGATING_TO_WORKORDER';" +
                     "}" +
 
@@ -911,25 +916,36 @@ public class WfmFlowAutomationManager {
 
             view.evaluateJavascript(js, result -> {
                 String res = result != null ? result.replace("\"", "") : "";
-                if (res.startsWith("SUBMITTED_LOGIN")) {
-                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔐 [1/2] Mengirim login FLOW (" + flowUser + ")...", true);
+                String labelKey = (targetWonum != null && !targetWonum.isEmpty()) ? targetWonum : noSc;
+                if (res.startsWith("LOGIN_WRONG_PASSWORD")) {
+                    handlePipelineFailure(
+                            activity,
+                            "FLOW Telkom Akses",
+                            "Password FLOW salah untuk akun " + flowUser + ". Perbarui password di menu Pengaturan Akun WFM FLOW agar akun tidak terkunci.",
+                            cleanup
+                    );
+                    return;
+                } else if (res.startsWith("SUBMITTED_LOGIN")) {
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔐 [1/2] Mengirim login FLOW (" + flowUser + ")...", true);
                 } else if (res.startsWith("READY_FOR_OTP")) {
                     isWaitingForOtp[0] = true;
                     updateProgressNotification(activity, "📲 Masukkan OTP FLOW", "Buka dialog untuk verifikasi OTP", true);
-                    showOtpInputDialog(activity, view, noSc, isWaitingForOtp, cleanup);
+                    showOtpInputDialog(activity, view, noSc, targetWonum, isWaitingForOtp, cleanup);
+                } else if (res.startsWith("NAVIGATING_TO_WONUM")) {
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔍 [1/2] Membuka langsung Workorder " + targetWonum + "...", true);
                 } else if (res.startsWith("OPENED_FILTER_MODAL")) {
-                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Membuka Filter Search Workorder Fulfillment...", true);
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔍 [1/2] Membuka Filter Search Workorder Fulfillment...", true);
                 } else if (res.startsWith("APPLIED_SC_FILTER")) {
-                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "🔍 [1/2] Filter SC Order no di-Apply! Menunggu tabel...", true);
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "🔍 [1/2] Filter SC Order no di-Apply! Menunggu tabel...", true);
                 } else if (res.startsWith("ROW_CLICKED")) {
-                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📄 [1/2] Baris ditemukan! Membuka detail kartu Workorder...", true);
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "📄 [1/2] Baris ditemukan! Membuka detail kartu Workorder...", true);
                 } else if (res.startsWith("DETAIL_CARD_READY")) {
-                    updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "✅ [1/2] Kartu Workorder tampil! Mengambil Screenshot...", true);
+                    updateProgressNotification(activity, "⚡ Dispatch: " + labelKey, "✅ [1/2] Kartu Workorder tampil! Mengambil Screenshot...", true);
                     persistCookies(activity);
                     mainHandler.postDelayed(onCardReady, 600);
                     return;
                 }
-                runFlowPipelineFastLoop(view, isFinished, noSc, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
+                runFlowPipelineFastLoop(view, isFinished, noSc, targetWonum, flowUser, flowPass, flowSsCaptured, isWaitingForOtp, activity, onCardReady, cleanup, attempt + 1);
             });
         }, 350);
     }
@@ -938,7 +954,7 @@ public class WfmFlowAutomationManager {
      * Shows a clean 6-digit OTP input dialog with ADING's visual design.
      * When entered, it submits the OTP directly into the background WebView waiting on /otp.
      */
-    private static void showOtpInputDialog(Activity activity, WebView bgWebView, String noSc, boolean[] isWaitingForOtp, Runnable onCancel) {
+    private static void showOtpInputDialog(Activity activity, WebView bgWebView, String noSc, String targetWonum, boolean[] isWaitingForOtp, Runnable onCancel) {
         if (activity == null || activity.isFinishing()) return;
         mainHandler.post(() -> {
             try {
@@ -1037,6 +1053,9 @@ public class WfmFlowAutomationManager {
                     updateProgressNotification(activity, "⚡ Dispatch: " + noSc, "📲 Memverifikasi OTP FLOW Telegram...", true);
 
                     String safeOtp = escapeJs(otpCode);
+                    String safePostOtpUrl = (targetWonum != null && !targetWonum.trim().isEmpty())
+                            ? ("/EditWorkorder/" + escapeJs(targetWonum.trim()))
+                            : "/workorder";
                     String submitJs = "(function(){" +
                             "var inp = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
                             "if(inp){" +
@@ -1047,7 +1066,7 @@ public class WfmFlowAutomationManager {
                             "  if(window.Swal){" +
                             "    var origSwal = window.Swal.fire;" +
                             "    window.Swal.fire = function(){" +
-                            "      setTimeout(function(){ window.location.href = '/workorder'; }, 50);" +
+                            "      setTimeout(function(){ window.location.href = '" + safePostOtpUrl + "'; }, 50);" +
                             "      return origSwal.apply(this, arguments);" +
                             "    };" +
                             "  }" +
@@ -1115,20 +1134,34 @@ public class WfmFlowAutomationManager {
                 "var contact = getValByLabel('Contact Number');" +
                 "var cust = getValByLabel('Customer Name');" +
                 "var addr = getValByLabel('Service Address');" +
-                "var cardEl = null;" +
-                "var headers = document.querySelectorAll('.card-header, .bg-danger, h5, h6, div');" +
-                "for(var j=0; j<headers.length; j++){" +
-                "  var ht = (headers[j].innerText || '').trim();" +
-                "  if(ht === 'Workorder'){" +
-                "    cardEl = headers[j].closest('.tab-pane') || headers[j].closest('.card') || headers[j].parentElement;" +
-                "    if(cardEl) break;" +
+                "var formEl = document.querySelector('main form') || document.querySelector('form');" +
+                "var tabEl = null;" +
+                "var prodEl = null;" +
+                "var schedEl = null;" +
+                "var scanNodes = document.querySelectorAll('a, button, li, div, label, span, h5, h6');" +
+                "for(var j=0; j<scanNodes.length; j++){" +
+                "  var sn = scanNodes[j];" +
+                "  if(sn.children.length > 2) continue;" +
+                "  var st = (sn.innerText || '').trim();" +
+                "  if(!tabEl && st === 'Related Record'){" +
+                "    tabEl = sn.closest('ul, .nav, .nav-tabs') || sn.parentElement;" +
+                "  }" +
+                "  if(!prodEl && st.toLowerCase().indexOf('product name') !== -1){" +
+                "    prodEl = sn.closest('.row, .form-group, .mb-2, .mb-3') || sn.parentElement;" +
+                "  }" +
+                "  if(!schedEl && st === 'Scheduling Information'){" +
+                "    schedEl = sn;" +
                 "  }" +
                 "}" +
                 "var rectObj = null;" +
-                "if(cardEl){" +
-                "  cardEl.scrollIntoView({block:'start', inline:'nearest'});" +
-                "  var r = cardEl.getBoundingClientRect();" +
-                "  rectObj = {left:r.left, top:r.top, width:r.width, height:r.height, vw:window.innerWidth, vh:window.innerHeight};" +
+                "var anchorEl = tabEl || formEl;" +
+                "if(anchorEl){" +
+                "  anchorEl.scrollIntoView({block:'start', inline:'nearest'});" +
+                "  var fr = (formEl || anchorEl).getBoundingClientRect();" +
+                "  var topY = tabEl ? tabEl.getBoundingClientRect().top : fr.top;" +
+                "  var botY = prodEl ? (prodEl.getBoundingClientRect().bottom + 14) : (schedEl ? (schedEl.getBoundingClientRect().top - 8) : fr.bottom);" +
+                "  var cropH = Math.max(200, botY - topY);" +
+                "  rectObj = {left:fr.left, top:topY, width:fr.width, height:cropH, vw:window.innerWidth, vh:window.innerHeight};" +
                 "}" +
                 "return JSON.stringify({wo:wo, sc:sc, service_number:srv, contact_number:contact, customer_name:cust, service_address:addr, rect:rectObj});" +
                 "})();";
@@ -1256,8 +1289,8 @@ public class WfmFlowAutomationManager {
             navRow.addView(btnLoginFlow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             container.addView(navRow);
 
-            addSectionHeader(container, activity, "🧪 Test Manual Cari SC di FLOW");
-            EditText etNoSc = createInput(activity, "NO SC (contoh: AOi4261112044318992845c20)", "", false);
+            addSectionHeader(container, activity, "🧪 Test Manual Cari WONUM / SC di FLOW");
+            EditText etNoSc = createInput(activity, "WONUM (contoh: WO069272106) atau NO SC", "", false);
             container.addView(etNoSc);
 
             addSectionHeader(container, activity, "🔐 Akun FLOW (flow.telkomakses.co.id)");
@@ -1287,16 +1320,17 @@ public class WfmFlowAutomationManager {
 
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     saveCredentials(activity, etFlowUser.getText().toString(), etFlowPass.getText().toString());
-                    String sc = etNoSc.getText().toString().trim();
-                    if (sc.isEmpty()) {
-                        Toast.makeText(activity, "Masukkan NO SC terlebih dahulu!", Toast.LENGTH_SHORT).show();
+                    String inputVal = etNoSc.getText().toString().trim();
+                    if (inputVal.isEmpty()) {
+                        Toast.makeText(activity, "Masukkan WONUM atau NO SC terlebih dahulu!", Toast.LENGTH_SHORT).show();
                         return;
                     }
+                    String manualWonum = inputVal.toUpperCase().startsWith("WO") ? inputVal.toUpperCase() : "";
                     dialog.dismiss();
                     runFullDispatchToFlowPipeline(
                             activity,
-                            sc,
-                            "",
+                            inputVal,
+                            manualWonum,
                             "",
                             "",
                             "",
