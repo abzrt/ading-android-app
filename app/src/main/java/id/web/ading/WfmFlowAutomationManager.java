@@ -686,10 +686,13 @@ public class WfmFlowAutomationManager {
     ) {
         if (isFinished[0] || flowSsCaptured[0] || attempt > 110) {
             if (attempt > 110 && !flowSsCaptured[0] && !isFinished[0]) {
+                String curUrl = "";
+                try { curUrl = view != null && view.getUrl() != null ? view.getUrl() : ""; } catch (Exception ignored) {}
+                String woInfo = (targetWonum != null && !targetWonum.isEmpty()) ? targetWonum : ("(kosong, SC=" + noSc + ")");
                 handlePipelineFailure(
                         activity,
                         "FLOW Telkom Akses",
-                        "Waktu habis (Timeout) saat memproses data di FLOW Telkom Akses. Tidak dapat menemukan Workorder atau sesi login kadaluarsa.",
+                        "Waktu habis (Timeout) di FLOW Telkom Akses.\nWONUM: " + woInfo + "\nURL terakhir: " + curUrl,
                         cleanup
                 );
             }
@@ -800,12 +803,12 @@ public class WfmFlowAutomationManager {
                     "      }" +
                     "    }" +
                     "  }" +
-                    "  var scInput = document.querySelector('input[placeholder*=\"SC Order\" i], input[name*=\"sc_order\" i], input[id*=\"sc_order\" i]');" +
+                    "  var scInput = document.querySelector('input[placeholder*=\"Track\" i], input[name*=\"track\" i], input[id*=\"track\" i], input[placeholder*=\"SC Order\" i], input[name*=\"sc_order\" i], input[id*=\"sc_order\" i]');" +
                     "  if(!scInput){" +
                     "    var labels = document.querySelectorAll('label, div, span');" +
                     "    for(var k=0; k<labels.length; k++){" +
                     "      var lTxt = (labels[k].innerText || '').trim().toLowerCase();" +
-                    "      if(lTxt === 'sc order no:' || lTxt === 'sc order no'){" +
+                    "      if(lTxt === 'track id' || lTxt === 'track id:' || lTxt === 'sc order no:' || lTxt === 'sc order no'){" +
                     "        var container = labels[k].parentElement;" +
                     "        scInput = container ? container.querySelector('input:not([readonly]):not([disabled])') : null;" +
                     "        if(scInput) break;" +
@@ -842,7 +845,7 @@ public class WfmFlowAutomationManager {
                     "    scInput.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', keyCode:13, bubbles:true}));" +
                     "    for(var a=0; a<btns.length; a++){" +
                     "      var aTxt = (btns[a].innerText || btns[a].value || '').trim().toLowerCase();" +
-                    "      if(aTxt === 'apply'){" +
+                    "      if(aTxt === 'apply' || aTxt === 'apply filters'){" +
                     "        window.__adingFlowFilterApplied = targetSc;" +
                     "        btns[a].click();" +
                     "        return 'APPLIED_SC_FILTER';" +
@@ -855,6 +858,18 @@ public class WfmFlowAutomationManager {
                     // 3. CHECK IF ON /otp PAGE OR #otp INPUT PRESENT
                     "var otpInput = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
                     "if(path.indexOf('/otp') !== -1 || otpInput){" +
+                    "  if(window.__adingOtpSubmitted){" +
+                    "    if(localStorage.getItem('menus')){" +
+                    "      window.location.href = targetFlowDest;" +
+                    "      return 'REDIRECT_TO_WORKORDER';" +
+                    "    }" +
+                    "    var otpSwal = (document.querySelector('.swal2-html-container, .swal2-content') || {}).innerText || '';" +
+                    "    if(otpSwal && (otpSwal.toLowerCase().indexOf('salah') !== -1 || otpSwal.toLowerCase().indexOf('invalid') !== -1 || otpSwal.toLowerCase().indexOf('expired') !== -1 || otpSwal.toLowerCase().indexOf('gagal') !== -1)){" +
+                    "      window.__adingOtpSubmitted = false;" +
+                    "      return 'READY_FOR_OTP';" +
+                    "    }" +
+                    "    return 'OTP_VERIFYING';" +
+                    "  }" +
                     "  return 'READY_FOR_OTP';" +
                     "}" +
 
@@ -1084,14 +1099,17 @@ public class WfmFlowAutomationManager {
                     String submitJs = "(function(){" +
                             "var inp = document.getElementById('otp') || document.querySelector('input[name=\"otp\"]');" +
                             "if(inp){" +
+                            "  window.__adingOtpSubmitted = true;" +
                             "  inp.focus();" +
                             "  inp.value = '" + safeOtp + "';" +
                             "  inp.dispatchEvent(new Event('input', {bubbles:true}));" +
                             "  inp.dispatchEvent(new Event('change', {bubbles:true}));" +
                             "  if(window.Swal){" +
                             "    var origSwal = window.Swal.fire;" +
-                            "    window.Swal.fire = function(){" +
-                            "      setTimeout(function(){ window.location.href = '" + safePostOtpUrl + "'; }, 50);" +
+                            "    window.Swal.fire = function(arg){" +
+                            "      var isErr = arg && (arg.icon === 'error' || String(arg.text || arg.title || '').toLowerCase().indexOf('salah') !== -1 || String(arg.text || arg.title || '').toLowerCase().indexOf('invalid') !== -1);" +
+                            "      if(!isErr){ setTimeout(function(){ window.location.href = '" + safePostOtpUrl + "'; }, 200); }" +
+                            "      else { window.__adingOtpSubmitted = false; }" +
                             "      return origSwal.apply(this, arguments);" +
                             "    };" +
                             "  }" +
