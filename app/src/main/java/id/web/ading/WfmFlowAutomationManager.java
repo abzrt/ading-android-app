@@ -54,11 +54,15 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -81,6 +85,7 @@ public class WfmFlowAutomationManager {
     public static final String DEFAULT_TG_TOKEN = "9111712229:AAERRc7RmQMXy4LSIvA-mty5Ckw6q-b0cUQ";
     public static final String DEFAULT_TG_CHAT_ID = "217411824";
     public static final String RAILWAY_BRIDGE_URL = "https://bot-production-a5484be7.up.railway.app/api/ading/dispatch";
+    public static final String RAILWAY_WFM_STANDALONE_URL = "https://bot-production-a5484be7.up.railway.app/api/wfm/dispatch";
     public static final String DEFAULT_TECH_MAPPING =
             "ARIFIN=-1002202217652,@Mimpi_bergadang\n" +
             "MUHAMMAD RISQI=-1002165761538\n" +
@@ -487,6 +492,16 @@ public class WfmFlowAutomationManager {
             String assignedBy = obj.optString("assigned_by", "").trim();
             String copiedText = obj.optString("copied_text", "").trim();
 
+            if (wonum.isEmpty() && !copiedText.isEmpty()) {
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\bWO\\d{6,}\\b", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(copiedText);
+                if (m.find()) wonum = m.group().toUpperCase(Locale.ROOT);
+            }
+
+            if (!wonum.isEmpty()) {
+                dispatchViaRailwayStandalone(activity, noSc, wonum, leaderName, leaderNik, namaTim, copiedText);
+                return;
+            }
+
             runFullDispatchToFlowPipeline(
                     activity,
                     noSc,
@@ -504,6 +519,115 @@ public class WfmFlowAutomationManager {
             );
         } catch (Exception ignored) {
         }
+    }
+
+    private static void dispatchViaRailwayStandalone(
+            Activity activity,
+            String noSc,
+            String wonum,
+            String leaderName,
+            String leaderNik,
+            String namaTim,
+            String copiedText
+    ) {
+        String techDisplay = !leaderName.isEmpty()
+                ? leaderName + (!leaderNik.isEmpty() ? " (" + leaderNik + ")" : "")
+                : (!namaTim.isEmpty() ? namaTim : "Teknisi");
+        String fallbackChatId = getPrefs(activity).getString(KEY_TG_CHAT_ID, DEFAULT_TG_CHAT_ID);
+
+        mainHandler.post(() -> {
+            Toast.makeText(activity, "⚡ Mengirim " + wonum + " via WFM Standalone Railway...", Toast.LENGTH_SHORT).show();
+            updateProgressNotification(
+                    activity,
+                    "⚡ Dispatch Standalone: " + wonum,
+                    "Server Railway sedang mengambil SS HD FLOW & mengirim ke channel " + techDisplay + "...",
+                    true
+            );
+        });
+
+        tgExecutor.execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                JSONObject payload = new JSONObject();
+                payload.put("wonum", wonum);
+                payload.put("no_sc", noSc);
+                payload.put("leader_name", leaderName);
+                payload.put("leader_nik", leaderNik);
+                payload.put("nama_tim", namaTim);
+                payload.put("caption", copiedText);
+                payload.put("fallback_chat_id", fallbackChatId != null ? fallbackChatId.trim() : DEFAULT_TG_CHAT_ID);
+
+                URL url = new URL(RAILWAY_WFM_STANDALONE_URL);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(210000);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                byte[] bodyBytes = payload.toString().getBytes(StandardCharsets.UTF_8);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(bodyBytes);
+                    os.flush();
+                }
+
+                int code = conn.getResponseCode();
+                InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder sb = new StringBuilder();
+                if (is != null) {
+                    try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                    }
+                }
+                JSONObject res = new JSONObject(sb.toString());
+                if (code >= 200 && code < 300 && res.optBoolean("ok", false)) {
+                    boolean isFallback = res.optBoolean("fallback", false);
+                    JSONArray titlesArr = res.optJSONArray("matched_titles");
+                    StringBuilder titlesSb = new StringBuilder();
+                    if (titlesArr != null) {
+                        for (int i = 0; i < titlesArr.length(); i++) {
+                            if (i > 0) titlesSb.append(", ");
+                            titlesSb.append(titlesArr.optString(i, ""));
+                        }
+                    }
+                    String targetLabel = titlesSb.length() > 0 ? titlesSb.toString() : techDisplay;
+                    mainHandler.post(() -> {
+                        if (isFallback) {
+                            updateProgressNotification(
+                                    activity,
+                                    "⚠️ Dialihkan ke Chat Pribadi — " + wonum,
+                                    "Channel " + techDisplay + " belum ditemukan. SS HD dikirim ke chat pribadi Anda.",
+                                    false
+                            );
+                            Toast.makeText(activity, "⚠️ Channel belum ditemukan, SS " + wonum + " dikirim ke chat pribadi.", Toast.LENGTH_LONG).show();
+                        } else {
+                            updateProgressNotification(
+                                    activity,
+                                    "✅ Terkirim ke Telegram — " + targetLabel,
+                                    "SS HD " + wonum + " + Data Unmasked berhasil dikirim via WFM Standalone Railway.",
+                                    false
+                            );
+                            Toast.makeText(activity, "✅ SS HD " + wonum + " terkirim ke " + targetLabel + "!", Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } else {
+                    String errMsg = res.optString("error", "HTTP " + code);
+                    mainHandler.post(() -> {
+                        updateProgressNotification(activity, "❌ Gagal WFM Standalone — " + wonum, errMsg, false);
+                        Toast.makeText(activity, "❌ Gagal " + wonum + ": " + errMsg, Toast.LENGTH_LONG).show();
+                    });
+                }
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                mainHandler.post(() -> {
+                    updateProgressNotification(activity, "❌ Error Koneksi Railway — " + wonum, msg, false);
+                    Toast.makeText(activity, "❌ Error Railway: " + msg, Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        });
     }
 
     /**
