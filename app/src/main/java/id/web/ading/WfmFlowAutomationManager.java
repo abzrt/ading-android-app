@@ -89,7 +89,7 @@ public class WfmFlowAutomationManager {
     public static final String RAILWAY_API_KEY = "ading-wfm-2026-telkom";
     public static final String DEFAULT_TECH_MAPPING =
             "ARIFIN=-1002202217652,@Mimpi_bergadang\n" +
-            "MUHAMMAD RISQI=-1002165761538\n" +
+            "MUHAMMAD RISQI=-1005839757356\n" +
             "AHMAD SYAHRIZAL RAMADHANI=-1002280689139\n" +
             "ANJELLO=-1002960116555,@embu_mamo_SK\n" +
             "ANDI MUHAMMAD RAJAB=-1003818907805\n" +
@@ -2108,6 +2108,7 @@ public class WfmFlowAutomationManager {
             conn.setReadTimeout(25000);
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setRequestProperty("X-Ading-Key", RAILWAY_API_KEY);
 
             byte[] payloadBytes = body.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream out = conn.getOutputStream()) {
@@ -2157,8 +2158,13 @@ public class WfmFlowAutomationManager {
                     writeMultipartField(out, boundary, "message_thread_id", threadId.trim());
                 }
                 if (caption != null && !caption.isEmpty()) {
-                    String safeCaption = caption.length() > 1020 ? caption.substring(0, 1020) : caption;
-                    writeMultipartField(out, boundary, "caption", safeCaption);
+                    String safePlain = caption.length() > 950 ? caption.substring(0, 950) : caption;
+                    String[] formatted = formatTelegramDispatchHtmlAndMarkup(safePlain);
+                    writeMultipartField(out, boundary, "caption", formatted[0]);
+                    writeMultipartField(out, boundary, "parse_mode", "HTML");
+                    if (formatted[1] != null && !formatted[1].isEmpty()) {
+                        writeMultipartField(out, boundary, "reply_markup", formatted[1]);
+                    }
                 }
                 out.writeBytes("--" + boundary + "\r\n");
                 out.writeBytes("Content-Disposition: form-data; name=\"photo\"; filename=\"workorder.png\"\r\n");
@@ -2183,6 +2189,114 @@ public class WfmFlowAutomationManager {
         out.writeBytes("Content-Type: text/plain; charset=UTF-8\r\n\r\n");
         out.write(value.getBytes(StandardCharsets.UTF_8));
         out.writeBytes("\r\n");
+    }
+
+    private static String[] formatTelegramDispatchHtmlAndMarkup(String plainCaption) {
+        StringBuilder htmlOut = new StringBuilder();
+        StringBuilder summaryOut = new StringBuilder();
+        String waDigits = "";
+        String mapsCoord = "";
+        String[] lines = plainCaption.split("\\r?\\n");
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) htmlOut.append("\n");
+            String rawLine = lines[i];
+            int colonIdx = rawLine.indexOf(':');
+            if (colonIdx < 0) {
+                htmlOut.append(escapeHtml(rawLine));
+                continue;
+            }
+            String label = rawLine.substring(0, colonIdx).trim();
+            String labelUpper = label.toUpperCase(Locale.ROOT);
+            String val = rawLine.substring(colonIdx + 1).trim();
+            if (val.isEmpty() || "-".equals(val)) {
+                htmlOut.append(escapeHtml(label)).append(": ").append(escapeHtml(val));
+                continue;
+            }
+            if ("CONTACT NUMBER".equals(labelUpper)) {
+                String digits = val.replaceAll("\\D+", "");
+                if (digits.startsWith("0")) digits = "62" + digits.substring(1);
+                else if (digits.startsWith("8")) digits = "62" + digits;
+                if (digits.length() >= 9) {
+                    waDigits = digits;
+                    if (summaryOut.length() > 0) summaryOut.append("\n");
+                    summaryOut.append("HP: +").append(digits);
+                    htmlOut.append(escapeHtml(label)).append(": +").append(digits)
+                            .append(" (<a href=\"https://wa.me/").append(digits).append("\">💬 WA</a>)");
+                } else {
+                    htmlOut.append(escapeHtml(label)).append(": <code>").append(escapeHtml(val)).append("</code>");
+                }
+                continue;
+            }
+            if ("KORDINAT".equals(labelUpper) || "KOORDINAT".equals(labelUpper)) {
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("(-?\\d{1,3}\\.\\d+)\\s*,\\s*(-?\\d{1,3}\\.\\d+)").matcher(val);
+                if (m.find()) {
+                    String lat = m.group(1);
+                    String lng = m.group(2);
+                    mapsCoord = lat + "," + lng;
+                    if (summaryOut.length() > 0) summaryOut.append("\n");
+                    summaryOut.append("LOC: ").append(mapsCoord);
+                    htmlOut.append(escapeHtml(label)).append(": <code>").append(escapeHtml(val))
+                            .append("</code> (<a href=\"https://maps.google.com/?q=").append(mapsCoord).append("\">📍 Maps</a>)");
+                } else {
+                    htmlOut.append(escapeHtml(label)).append(": <code>").append(escapeHtml(val)).append("</code>");
+                }
+                continue;
+            }
+            if ("NO SC".equals(labelUpper) || "WONUM".equals(labelUpper) || "NO INTERNET".equals(labelUpper)
+                    || "CUSTOMER NAME".equals(labelUpper) || "ALAMAT".equals(labelUpper) || "ODP".equals(labelUpper)) {
+                if (!"ALAMAT".equals(labelUpper)) {
+                    if (summaryOut.length() > 0) summaryOut.append("\n");
+                    String shortVal = val.length() > 40 ? val.substring(0, 40) : val;
+                    summaryOut.append(labelUpper).append(": ").append(shortVal);
+                }
+                htmlOut.append(escapeHtml(label)).append(": <code>").append(escapeHtml(val)).append("</code>");
+                continue;
+            }
+            htmlOut.append(escapeHtml(label)).append(": ").append(escapeHtml(val));
+        }
+
+        String markupJson = "";
+        try {
+            JSONArray rows = new JSONArray();
+            JSONArray actionRow = new JSONArray();
+            if (!waDigits.isEmpty()) {
+                JSONObject b = new JSONObject();
+                b.put("text", "💬 Chat WA");
+                b.put("url", "https://wa.me/" + waDigits);
+                actionRow.put(b);
+            }
+            if (!mapsCoord.isEmpty()) {
+                JSONObject b = new JSONObject();
+                b.put("text", "📍 Buka Maps");
+                b.put("url", "https://maps.google.com/?q=" + mapsCoord);
+                actionRow.put(b);
+            }
+            if (actionRow.length() > 0) rows.put(actionRow);
+            if (summaryOut.length() > 0) {
+                String copyTxt = summaryOut.toString();
+                if (copyTxt.length() > 250) copyTxt = copyTxt.substring(0, 250);
+                JSONObject copyObj = new JSONObject();
+                copyObj.put("text", copyTxt);
+                JSONObject copyBtn = new JSONObject();
+                copyBtn.put("text", "📋 Copy Ringkas");
+                copyBtn.put("copy_text", copyObj);
+                JSONArray copyRow = new JSONArray();
+                copyRow.put(copyBtn);
+                rows.put(copyRow);
+            }
+            if (rows.length() > 0) {
+                JSONObject rm = new JSONObject();
+                rm.put("inline_keyboard", rows);
+                markupJson = rm.toString();
+            }
+        } catch (Exception ignored) {
+        }
+        return new String[]{htmlOut.toString(), markupJson};
+    }
+
+    private static String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private static String escapeJs(String s) {
