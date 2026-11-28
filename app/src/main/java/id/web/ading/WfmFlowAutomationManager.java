@@ -90,7 +90,7 @@ public class WfmFlowAutomationManager {
     public static final String DEFAULT_TECH_MAPPING =
             "ARIFIN=-1002202217652,@Mimpi_bergadang\n" +
             "MUHAMMAD RISQI=-1002165761538\n" +
-            "AHMAD SYAHRIZAK RAMADHANI=-1002280689139\n" +
+            "AHMAD SYAHRIZAL RAMADHANI=-1002280689139\n" +
             "ANJELLO=-1002960116555,@embu_mamo_SK\n" +
             "ANDI MUHAMMAD RAJAB=-1003818907805\n" +
             "MUHAMMAD NAZAR ALFATH=-1004329000380\n" +
